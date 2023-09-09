@@ -1,0 +1,12 @@
+install numpy==1.24.2
+install 
+install torch==1.13.1
+install gym==0.21.0
+install gym-super-mario-bros==7.4.0
+install autorom==0.4.2
+install autorom-accept-rom-license==0.6.1
+install opencv-python==4.6.0.66
+install pillow==9.5.0
+install tensorboard==2.13.0
+install tensorboard-data-server==0.7.0
+install gym[atari,accept-rom-license]==0.21.0

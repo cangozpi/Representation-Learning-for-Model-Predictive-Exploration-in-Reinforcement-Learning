@@ -8,12 +8,18 @@ Following from these two findings, we believe that for "prediction-based" explor
 ---
 
 ### Installation:
+_Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
 * Installation with Docker:
     ```bash
-    ... # create Image
-    ... # create and run Container
+    make docker_build # create Image
+    make docker_start # create and run Container
     ```
+    ---
 
+* Installation with conda:
+    ```bash
+    conda create --name <env> python=3.8.16 --file requirements.txt
+    ```
 ### To Run:
 * Run RND training code:
     ```bash
