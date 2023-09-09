@@ -1,0 +1,20 @@
+1) train_model() ...
+2) multiprocessing.Pipe() ...
+3) AtariEnvironment --> Process class + unwrap() ...
+PPO nerede (Actor-Critic var model.py'da) ? ...
+---
+
+* states --> [num_worker, 4, 84, 84]: 4=(stacked_frames * H * W* 3), 84 is H and W.
+
+* agent = RNDAgent
+* RNDAgent --> [RNDModel + CNNActorCritic]
+
+---
+
+fork() -> make a duplicate of the parent process + references the same memory as the parent + cheaper compared to spawn()
+spawn() -> creates a totaly new process + brand new memory
+
+OpenCL --> code runs on GPU
+vs
+MPI (Message Passing Interface) --> handles communication between processes running on different machines(GPUs).
+
