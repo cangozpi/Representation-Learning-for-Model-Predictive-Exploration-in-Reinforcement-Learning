@@ -30,8 +30,8 @@ def main():
 
     env.close()
 
-    is_load_model = False # True
-    is_render = False
+    is_load_model = default_config.getboolean('loadModel')
+    is_render = default_config.getboolean('render')
     model_path = 'models/{}.model'.format(env_id)
     predictor_path = 'models/{}.pred'.format(env_id)
     target_path = 'models/{}.target'.format(env_id)
