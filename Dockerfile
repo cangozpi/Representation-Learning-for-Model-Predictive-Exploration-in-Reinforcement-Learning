@@ -31,6 +31,7 @@ RUN python3 -m pip install pip==23.0.1 # Upgrade to a specific version
 RUN apt install ffmpeg libsm6 libxext6 -y
 RUN pip3 install numpy==1.24.2
 RUN pip3 install torch==1.13.1
+RUN pip3 install torchvision==0.15.2
 RUN pip3 install gym==0.21.0
 RUN pip3 install gym-super-mario-bros==7.4.0
 RUN pip3 install autorom==0.4.2

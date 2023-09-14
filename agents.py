@@ -10,6 +10,8 @@ from torch.distributions.categorical import Categorical
 from model import CnnActorCriticNetwork, RNDModel
 from utils import global_grad_norm_
 
+from BYOL import BYOL, Augment
+
 
 class RNDAgent(object):
     def __init__(
@@ -47,11 +49,21 @@ class RNDAgent(object):
         self.device = torch.device('cuda' if use_cuda else 'cpu')
 
         self.rnd = RNDModel(input_size, output_size)
-        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()),
-                                    lr=learning_rate)
-        self.rnd = self.rnd.to(self.device)
+        
+        # --------------------------------------------------------------------------------
+        # for BYOL (Bootstrap Your Own Latent)
+        backbone_model = self.model.feature
+        self.representation_model = BYOL(backbone_model, in_features=448, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
+        self.data_transform = Augment(84)
+        # --------------------------------------------------------------------------------
 
+        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.parameters()),
+                                    lr=learning_rate)
+
+        self.rnd = self.rnd.to(self.device)
         self.model = self.model.to(self.device)
+        self.representation_model = self.representation_model.to(self.device)
+
 
     def get_action(self, state):
         state = torch.Tensor(state).to(self.device)
@@ -112,6 +124,41 @@ class RNDAgent(object):
                 forward_loss = (forward_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
                 # ---------------------------------------------------------------------------------
 
+
+                # --------------------------------------------------------------------------------
+                # for BYOL (Bootstrap Your Own Latent):
+                # sample image transformations and transform the images to obtain the 2 views
+                B, STATE_STACK_SIZE, H, W = s_batch.shape
+                s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
+                    torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
+                
+                assert self.representation_model.net is self.model.feature # make sure that BYOL net and RL algo's feature extractor both point to the same network
+
+                # plot original frame vs transformed views for debugging purposes
+                if False:
+                    import matplotlib.pyplot as plt
+                    for i in range(4):
+                        idx = np.random.choice(B)
+                        print(idx)
+                        fig, axs = plt.subplots(4, 2)
+                        axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                        axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                        axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                        axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                        axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                        axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                        axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                        axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                        plt.show()
+
+                # compute BYOL loss
+                BYOL_loss = self.representation_model(s_batch_view1, s_batch_view2) 
+                # ---------------------------------------------------------------------------------
+
+
+                # --------------------------------------------------------------------------------
+                # for Proximal Policy Optimization(PPO):
                 policy, value_ext, value_int = self.model(s_batch[sample_idx])
                 m = Categorical(F.softmax(policy, dim=-1))
                 log_prob = m.log_prob(y_batch[sample_idx])
@@ -131,9 +178,13 @@ class RNDAgent(object):
                 critic_loss = critic_ext_loss + critic_int_loss
 
                 entropy = m.entropy().mean()
+                # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
-                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + forward_loss
+                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + forward_loss + BYOL_loss
                 loss.backward()
                 global_grad_norm_(list(self.model.parameters())+list(self.rnd.predictor.parameters()))
                 self.optimizer.step()
+
+                # EMA update BYOL target network params
+                self.representation_model.update_moving_average()

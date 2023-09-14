@@ -1,5 +1,6 @@
 install numpy==1.24.2
 install torch==1.13.1
+install torchvision==0.15.2
 install gym==0.21.0
 install gym-super-mario-bros==7.4.0
 install autorom==0.4.2

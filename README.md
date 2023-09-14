@@ -34,7 +34,23 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
 ---
 
 ### Appendix:
+__Model Predictive Exploration:__
 * Random Network Distillation (RND): 
     
     * Paper: https://arxiv.org/abs/1810.12894
     * Code: https://github.com/jcwleo/random-network-distillation-pytorch
+
+__Non-Contrastive Representation Learning:__
+* BYOL-Explore: Exploration by Bootstrapped Prediction:
+
+    * Paper: https://arxiv.org/abs/2206.08332
+
+
+* Bootstrap Your Own Latent A new Approach to Self-Supervised Learning (BYOL):
+
+    * Paper: https://arxiv.org/pdf/2006.07733.pdf
+    * Code: 
+        
+        1. https://github.com/The-AI-Summer/byol-cifar10/blob/main/ai_summer_byol_in_cifar10.py#L92
+        2. https://github.com/SaeedShurrab/Simple-BYOL/blob/master/byol.py
+        3. https://github.com/lucidrains/byol-pytorch/blob/master/byol_pytorch/byol_pytorch.py

@@ -35,6 +35,7 @@ def main():
     model_path = 'models/{}.model'.format(env_id)
     predictor_path = 'models/{}.pred'.format(env_id)
     target_path = 'models/{}.target'.format(env_id)
+    representation_model_path = 'models/{}.representationModelPath'.format(env_id)
 
     writer = SummaryWriter()
 
@@ -95,16 +96,22 @@ def main():
         use_noisy_net=use_noisy_net
     )
 
+
     if is_load_model:
         print('load model...')
         if use_cuda:
             agent.model.load_state_dict(torch.load(model_path))
             agent.rnd.predictor.load_state_dict(torch.load(predictor_path))
             agent.rnd.target.load_state_dict(torch.load(target_path))
+            agent.representation_model.load_state_dict(torch.load(representation_model_path))
+            agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+
         else:
             agent.model.load_state_dict(torch.load(model_path, map_location='cpu'))
             agent.rnd.predictor.load_state_dict(torch.load(predictor_path, map_location='cpu'))
             agent.rnd.target.load_state_dict(torch.load(target_path, map_location='cpu'))
+            agent.representation_model.load_state_dict(torch.load(representation_model_path, map_location='cpu'))
+            agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
         print('load finished!')
 
     works = []
@@ -130,7 +137,7 @@ def main():
     global_step = 0
 
     # normalize obs
-    print('Start to initailize observation normalization parameter.....')
+    print('Start to initialize observation normalization parameter.....')
     next_obs = []
     for step in range(num_step * pre_obs_norm_step):
         actions = np.random.randint(0, output_size, size=(num_worker,))
@@ -146,7 +153,7 @@ def main():
             next_obs = np.stack(next_obs)
             obs_rms.update(next_obs)
             next_obs = []
-    print('End to initalize...')
+    print('End to initialize...')
 
     while True:
         total_state, total_reward, total_done, total_next_state, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy, total_policy_np = \
@@ -171,15 +178,15 @@ def main():
                 log_rewards.append(lr)
                 next_obs.append(s[3, :, :].reshape([1, 84, 84]))
 
-            next_states = np.stack(next_states)
-            rewards = np.hstack(rewards)
-            dones = np.hstack(dones)
-            real_dones = np.hstack(real_dones)
-            next_obs = np.stack(next_obs)
+            next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
+            rewards = np.hstack(rewards) # -> [num_env, ]
+            dones = np.hstack(dones) # -> [num_env, ]
+            real_dones = np.hstack(real_dones) # -> [num_env, ]
+            next_obs = np.stack(next_obs) # -> [num_env, 1, H, W]
 
             # total reward = int reward + ext Reward
             intrinsic_reward = agent.compute_intrinsic_reward(
-                ((next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5))
+                ((next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
             intrinsic_reward = np.hstack(intrinsic_reward)
             sample_i_rall += intrinsic_reward[sample_env_idx]
 
@@ -278,6 +285,7 @@ def main():
             torch.save(agent.model.state_dict(), model_path)
             torch.save(agent.rnd.predictor.state_dict(), predictor_path)
             torch.save(agent.rnd.target.state_dict(), target_path)
+            torch.save(agent.representation_model.state_dict(), representation_model_path)
 
 
 if __name__ == '__main__':
