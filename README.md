@@ -40,6 +40,8 @@ __Model Predictive Exploration:__
     * Paper: https://arxiv.org/abs/1810.12894
     * Code: https://github.com/jcwleo/random-network-distillation-pytorch
 
+    ---
+
 __Non-Contrastive Representation Learning:__
 * BYOL-Explore: Exploration by Bootstrapped Prediction:
 
@@ -54,3 +56,13 @@ __Non-Contrastive Representation Learning:__
         1. https://github.com/The-AI-Summer/byol-cifar10/blob/main/ai_summer_byol_in_cifar10.py#L92
         2. https://github.com/SaeedShurrab/Simple-BYOL/blob/master/byol.py
         3. https://github.com/lucidrains/byol-pytorch/blob/master/byol_pytorch/byol_pytorch.py
+
+* Barlow Twins: Self-Supervised Learning via Redundancy Reduction
+
+    * Paper: https://arxiv.org/pdf/2103.03230.pdf
+    * Code:
+
+        1. https://github.com/facebookresearch/barlowtwins
+        2. https://github.com/MaxLikesMath/Barlow-Twins-Pytorch
+        3. https://github.com/IgorSusmelj/barlowtwins
+        4. https://github.com/leot13/BarlowTwins

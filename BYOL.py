@@ -14,7 +14,7 @@ class Augment:
     resulting in two correlated views of the same example,
     denoted x ̃i and x ̃j, which we consider as a positive pair.
     """
-    def __init__(self, img_size, s=1):
+    def __init__(self, img_size=224, s=1):
         color_jitter = T.ColorJitter(
             0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s
         )

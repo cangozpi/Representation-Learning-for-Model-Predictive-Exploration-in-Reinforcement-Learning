@@ -52,9 +52,21 @@ class RNDAgent(object):
         
         # --------------------------------------------------------------------------------
         # for BYOL (Bootstrap Your Own Latent)
-        backbone_model = self.model.feature
-        self.representation_model = BYOL(backbone_model, in_features=448, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
-        self.data_transform = Augment(84)
+        if False:
+            backbone_model = self.model.feature
+            self.representation_model = BYOL(backbone_model, in_features=448, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
+            self.data_transform = Augment(84)
+        # --------------------------------------------------------------------------------
+
+        # --------------------------------------------------------------------------------
+        # for Barlow-Twins
+        if True:
+            backbone_model = self.model.feature
+            from BarlowTwins import BarlowTwins, Transform
+            projection_sizes = [512, 512, 512, 512]
+            lambd = 0.5
+            self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=lambd, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
+            self.data_transform = Transform(img_size=84)
         # --------------------------------------------------------------------------------
 
         self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.parameters()),
@@ -125,35 +137,72 @@ class RNDAgent(object):
                 # ---------------------------------------------------------------------------------
 
 
+                representation_loss = 0
                 # --------------------------------------------------------------------------------
                 # for BYOL (Bootstrap Your Own Latent):
-                # sample image transformations and transform the images to obtain the 2 views
-                B, STATE_STACK_SIZE, H, W = s_batch.shape
-                s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
-                s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
-                    torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
-                
-                assert self.representation_model.net is self.model.feature # make sure that BYOL net and RL algo's feature extractor both point to the same network
-
-                # plot original frame vs transformed views for debugging purposes
                 if False:
-                    import matplotlib.pyplot as plt
-                    for i in range(4):
-                        idx = np.random.choice(B)
-                        print(idx)
-                        fig, axs = plt.subplots(4, 2)
-                        axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                        axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                        axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                        axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                        axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                        axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                        axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
-                        axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
-                        plt.show()
+                    # sample image transformations and transform the images to obtain the 2 views
+                    B, STATE_STACK_SIZE, H, W = s_batch.shape
+                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
+                        torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
+                
+                    assert self.representation_model.net is self.model.feature # make sure that BYOL net and RL algo's feature extractor both point to the same network
 
-                # compute BYOL loss
-                BYOL_loss = self.representation_model(s_batch_view1, s_batch_view2) 
+                    # plot original frame vs transformed views for debugging purposes
+                    if False:
+                        import matplotlib.pyplot as plt
+                        for i in range(4):
+                            idx = np.random.choice(B)
+                            print(idx)
+                            fig, axs = plt.subplots(4, 2)
+                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            plt.show()
+
+                    # compute BYOL loss
+                    BYOL_loss = self.representation_model(s_batch_view1, s_batch_view2) 
+                    representation_loss = BYOL_loss
+                # ---------------------------------------------------------------------------------
+
+
+                # --------------------------------------------------------------------------------
+                # for Barlow-Twins:
+                if True:
+                    # sample image transformations and transform the images to obtain the 2 views
+                    B, STATE_STACK_SIZE, H, W = s_batch.shape
+                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
+                        torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
+                
+                    assert self.representation_model.backbone is self.model.feature # make sure that Barlow-Twins backbone and RL algo's feature extractor both point to the same network
+
+                    # plot original frame vs transformed views for debugging purposes
+                    if True:
+                        import matplotlib.pyplot as plt
+                        for i in range(4):
+                            idx = np.random.choice(B)
+                            print(idx)
+                            fig, axs = plt.subplots(4, 2)
+                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            plt.show()
+
+                    # compute Barlow-Twins loss
+                    BarlowTwins_loss = self.representation_model(s_batch_view1, s_batch_view2) 
+                    representation_loss = BarlowTwins_loss
                 # ---------------------------------------------------------------------------------
 
 
@@ -181,10 +230,11 @@ class RNDAgent(object):
                 # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
-                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + forward_loss + BYOL_loss
+                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + forward_loss + representation_loss
                 loss.backward()
                 global_grad_norm_(list(self.model.parameters())+list(self.rnd.predictor.parameters()))
                 self.optimizer.step()
 
                 # EMA update BYOL target network params
-                self.representation_model.update_moving_average()
+                if False:
+                    self.representation_model.update_moving_average()
