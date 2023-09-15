@@ -54,7 +54,7 @@ class BarlowTwins(nn.Module):
         return loss
 
 
-class GaussianBlur(object):
+class GaussianBlur(object): # from facebookresearch code
     def __init__(self, p):
         self.p = p
 
@@ -65,7 +65,7 @@ class GaussianBlur(object):
         else:
             return img
 
-class Solarization(object):
+class Solarization(object): # from facebookresearch code
     def __init__(self, p):
         self.p = p
 
@@ -87,8 +87,15 @@ class Transform:
                 p=0.8
             ),
             # transforms.RandomGrayscale(p=0.2),
+
+            # Facebook's GaussianBlur method cannot process batches of img tensors hence swapped it with transforms.* equivalent
             # GaussianBlur(p=1.0),
+            # transforms.GaussianBlur(kernel_size=3),
+
+            # Facebook's RandomSolarize method cannot process batches of img tensors hence swapped it with transforms.* equivalent
             # Solarization(p=0.0),
+            # transforms.RandomSolarize(threshold=128, p=0.0),
+
             # transforms.ToTensor(),
             # transforms.Normalize(mean=[0.485, 0.456, 0.406],
             #                      std=[0.229, 0.224, 0.225])
@@ -102,8 +109,15 @@ class Transform:
                 p=0.8
             ),
             # transforms.RandomGrayscale(p=0.2),
+
+            # Facebook's GaussianBlur method cannot process batches of img tensors hence swapped it with transforms.* equivalent
             # GaussianBlur(p=0.1),
+            # transforms.GaussianBlur(kernel_size=3),
+
+            # Facebook's RandomSolarize method cannot process batches of img tensors hence swapped it with transforms.* equivalent
             # Solarization(p=0.2),
+            # transforms.RandomSolarize(threshold=128, p=0.2),
+
             # transforms.ToTensor(),
             # transforms.Normalize(mean=[0.485, 0.456, 0.406],
             #                      std=[0.229, 0.224, 0.225])

@@ -4,7 +4,8 @@ from utils import *
 from config import *
 from torch.multiprocessing import Pipe
 
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import pickle
@@ -33,8 +34,10 @@ def main():
     model_path = 'models/{}.model'.format(env_id)
     predictor_path = 'models/{}.pred'.format(env_id)
     target_path = 'models/{}.target'.format(env_id)
+    BYOL_model_path = 'models/{}.BYOLModelPath'.format(env_id)
+    BarlowTwins_model_path = 'models/{}.BarlowTwinsModelPath'.format(env_id)
 
-    use_cuda = False
+    use_cuda = default_config.getboolean('UseGPU')
     use_gae = default_config.getboolean('UseGAE')
     use_noisy_net = default_config.getboolean('UseNoisyNet')
 
@@ -88,10 +91,23 @@ def main():
         agent.model.load_state_dict(torch.load(model_path))
         agent.rnd.predictor.load_state_dict(torch.load(predictor_path))
         agent.rnd.target.load_state_dict(torch.load(target_path))
+        if False: # BYOL
+            agent.representation_model.load_state_dict(torch.load(BYOL_model_path))
+            agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+        if True: # Barlow-Twins
+            agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path))
+            agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+
     else:
         agent.model.load_state_dict(torch.load(model_path, map_location='cpu'))
         agent.rnd.predictor.load_state_dict(torch.load(predictor_path, map_location='cpu'))
         agent.rnd.target.load_state_dict(torch.load(target_path, map_location='cpu'))
+        if False: # BYOL
+            agent.representation_model.load_state_dict(torch.load(BYOL_model_path, map_location='cpu'))
+            agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+        if True: # Barlow-Twins
+            agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path, map_location='cpu'))
+            agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
     print('End load...')
 
     works = []

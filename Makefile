@@ -15,5 +15,8 @@ docker_rm:
 train:
 	python3 train.py
 
+test:
+	python3 eval.py
+
 kill:
 	killall python3

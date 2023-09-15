@@ -184,7 +184,7 @@ class RNDAgent(object):
                     assert self.representation_model.backbone is self.model.feature # make sure that Barlow-Twins backbone and RL algo's feature extractor both point to the same network
 
                     # plot original frame vs transformed views for debugging purposes
-                    if True:
+                    if False:
                         import matplotlib.pyplot as plt
                         for i in range(4):
                             idx = np.random.choice(B)

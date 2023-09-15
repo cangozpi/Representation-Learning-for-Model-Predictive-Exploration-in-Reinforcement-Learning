@@ -17,6 +17,7 @@ from torch.multiprocessing import Pipe, Process
 from model import *
 from config import *
 from PIL import Image
+import matplotlib.pyplot as plt
 
 train_method = default_config['TrainMethod']
 max_step_per_episode = int(default_config['MaxStepPerEpisode'])
@@ -59,6 +60,11 @@ class MaxAndSkipEnv(gym.Wrapper):
         self._obs_buffer = np.zeros((2,) + env.observation_space.shape, dtype=np.uint8)
         self._skip = skip
         self.is_render = is_render
+        # custom rendering
+        if self.is_render:
+            plt.ion()
+            rendering_view = self.env.render("rgb_array")
+            self.ax = plt.imshow(rendering_view)
 
     def step(self, action):
         """Repeat action, sum reward, and max over last observations."""
@@ -67,7 +73,14 @@ class MaxAndSkipEnv(gym.Wrapper):
         for i in range(self._skip):
             obs, reward, done, info = self.env.step(action)
             if self.is_render:
-                self.env.render()
+                # custom rendering
+                rendering_view = self.env.render("rgb_array")
+                self.ax.set_data(rendering_view)
+                plt.xticks([])
+                plt.yticks([])
+                plt.axis
+                plt.pause(1/60)
+                # self.env.render()
             if i == self._skip - 2:
                 self._obs_buffer[0] = obs
             if i == self._skip - 1:
@@ -246,12 +259,25 @@ class MarioEnvironment(Process):
 
         self.reset()
 
+        # custom rendering
+        if self.is_render:
+            plt.ion()
+            rendering_view = self.env.render("rgb_array")
+            self.ax = plt.imshow(rendering_view)
+
     def run(self):
         super(MarioEnvironment, self).run()
         while True:
             action = self.child_conn.recv()
             if self.is_render:
-                self.env.render()
+                # custom rendering
+                rendering_view = self.env.render("rgb_array")
+                self.ax.set_data(rendering_view)
+                plt.xticks([])
+                plt.yticks([])
+                plt.axis
+                plt.pause(1/60)
+                # self.env.render()
 
             # sticky action
             if self.sticky_action:

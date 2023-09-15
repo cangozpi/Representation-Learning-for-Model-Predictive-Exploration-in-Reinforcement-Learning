@@ -2,7 +2,8 @@
 logs
 *.log
 __pycache__/
-models/
+models/*
+!models/.gitkeep
 runs/
 # Runtime data
 pids

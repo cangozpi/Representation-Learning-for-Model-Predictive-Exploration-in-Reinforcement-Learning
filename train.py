@@ -36,7 +36,7 @@ def main():
     predictor_path = 'models/{}.pred'.format(env_id)
     target_path = 'models/{}.target'.format(env_id)
     BYOL_model_path = 'models/{}.BYOLModelPath'.format(env_id)
-    BarlowTwins_model_path = 'models/{}.BYOLModelPath'.format(env_id)
+    BarlowTwins_model_path = 'models/{}.BarlowTwinsModelPath'.format(env_id)
 
     writer = SummaryWriter()
 
@@ -115,8 +115,12 @@ def main():
             agent.model.load_state_dict(torch.load(model_path, map_location='cpu'))
             agent.rnd.predictor.load_state_dict(torch.load(predictor_path, map_location='cpu'))
             agent.rnd.target.load_state_dict(torch.load(target_path, map_location='cpu'))
-            agent.representation_model.load_state_dict(torch.load(BYOL_model_path, map_location='cpu'))
-            agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+            if False: # BYOL
+                agent.representation_model.load_state_dict(torch.load(BYOL_model_path, map_location='cpu'))
+                agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+            if True: # Barlow-Twins
+                agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path, map_location='cpu'))
+                agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
         print('load finished!')
 
     works = []
@@ -285,7 +289,9 @@ def main():
                           total_policy)
         print("YOOO EXITTED TRAINIG:JJ")
 
-        if global_step % (num_worker * num_step * 100) == 0:
+        # if global_step % (num_worker * num_step * 100) == 0:
+        if True:
+            print("WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW SAVINGGG")
             print('Now Global Step :{}'.format(global_step))
             torch.save(agent.model.state_dict(), model_path)
             torch.save(agent.rnd.predictor.state_dict(), predictor_path)
