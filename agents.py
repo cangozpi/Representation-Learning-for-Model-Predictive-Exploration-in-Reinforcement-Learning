@@ -10,7 +10,6 @@ from torch.distributions.categorical import Categorical
 from model import CnnActorCriticNetwork, RNDModel
 from utils import global_grad_norm_
 
-from BYOL import BYOL, Augment
 
 
 class RNDAgent(object):
@@ -31,7 +30,8 @@ class RNDAgent(object):
             update_proportion=0.25,
             use_gae=True,
             use_cuda=False,
-            use_noisy_net=False):
+            use_noisy_net=False,
+            representation_lr_method="BYOL"):
         self.model = CnnActorCriticNetwork(input_size, output_size, use_noisy_net)
         self.num_env = num_env
         self.output_size = output_size
@@ -50,23 +50,26 @@ class RNDAgent(object):
 
         self.rnd = RNDModel(input_size, output_size)
         
+        assert representation_lr_method in [None, "BYOL", "Barlow-Twins"]
+        self.representation_lr_method = representation_lr_method
         # --------------------------------------------------------------------------------
         # for BYOL (Bootstrap Your Own Latent)
-        if False:
+        if self.representation_lr_method == "BYOL":
             backbone_model = self.model.feature
+            from BYOL import BYOL, Augment
             self.representation_model = BYOL(backbone_model, in_features=448, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
-            self.data_transform = Augment(84)
+            self.data_transform = Augment(input_size)
         # --------------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------------
         # for Barlow-Twins
-        if True:
+        if self.representation_lr_method == "Barlow-Twins":
             backbone_model = self.model.feature
             from BarlowTwins import BarlowTwins, Transform
             projection_sizes = [512, 512, 512, 512]
             lambd = 0.5
             self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=lambd, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
-            self.data_transform = Transform(img_size=84)
+            self.data_transform = Transform(input_size)
         # --------------------------------------------------------------------------------
 
         self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.parameters()),
@@ -140,7 +143,7 @@ class RNDAgent(object):
                 representation_loss = 0
                 # --------------------------------------------------------------------------------
                 # for BYOL (Bootstrap Your Own Latent):
-                if False:
+                if self.representation_lr_method == "BYOL":
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
                     s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
@@ -174,7 +177,7 @@ class RNDAgent(object):
 
                 # --------------------------------------------------------------------------------
                 # for Barlow-Twins:
-                if True:
+                if self.representation_lr_method == "Barlow-Twins":
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
                     s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
@@ -236,5 +239,5 @@ class RNDAgent(object):
                 self.optimizer.step()
 
                 # EMA update BYOL target network params
-                if False:
+                if self.representation_lr_method == "BYOL":
                     self.representation_model.update_moving_average()

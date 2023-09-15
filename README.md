@@ -48,7 +48,7 @@ __Non-Contrastive Representation Learning:__
     * Paper: https://arxiv.org/abs/2206.08332
 
 
-* Bootstrap Your Own Latent A new Approach to Self-Supervised Learning (BYOL):
+* Bootstrap Your Own Latent a New Approach to Self-Supervised Learning (BYOL):
 
     * Paper: https://arxiv.org/pdf/2006.07733.pdf
     * Code: 
@@ -64,5 +64,3 @@ __Non-Contrastive Representation Learning:__
 
         1. https://github.com/facebookresearch/barlowtwins
         2. https://github.com/MaxLikesMath/Barlow-Twins-Pytorch
-        3. https://github.com/IgorSusmelj/barlowtwins
-        4. https://github.com/leot13/BarlowTwins
