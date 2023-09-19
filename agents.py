@@ -20,7 +20,7 @@ class RNDAgent(object):
             num_env,
             num_step,
             gamma,
-            lam=0.95,
+            GAE_Lambda=0.95,
             learning_rate=1e-4,
             ent_coef=0.01,
             clip_grad_norm=0.5,
@@ -38,7 +38,7 @@ class RNDAgent(object):
         self.input_size = input_size
         self.num_step = num_step
         self.gamma = gamma
-        self.lam = lam
+        self.GAE_Lambda = GAE_Lambda
         self.epoch = epoch
         self.batch_size = batch_size
         self.use_gae = use_gae
@@ -50,15 +50,22 @@ class RNDAgent(object):
 
         self.rnd = RNDModel(input_size, output_size)
         
-        assert representation_lr_method in [None, "BYOL", "Barlow-Twins"]
+        assert representation_lr_method in ['None', "BYOL", "Barlow-Twins"]
         self.representation_lr_method = representation_lr_method
+        self.representation_model = None
+        self.representation_loss_coef = 0
         # --------------------------------------------------------------------------------
         # for BYOL (Bootstrap Your Own Latent)
         if self.representation_lr_method == "BYOL":
             backbone_model = self.model.feature
             from BYOL import BYOL, Augment
-            self.representation_model = BYOL(backbone_model, in_features=448, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
+            from config import default_config
+            BYOL_projection_hidden_size = int(default_config['BYOL_projectionHiddenSize'])
+            BYOL_projection_size = int(default_config['BYOL_projectionSize'])
+            BYOL_moving_average_decay = float(default_config['BYOL_movingAverageDecay'])
+            self.representation_model = BYOL(backbone_model, in_features=448, projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Augment(input_size)
+            self.representation_loss_coef = float(default_config['BYOL_representationLossCoef'])
         # --------------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------------
@@ -66,18 +73,26 @@ class RNDAgent(object):
         if self.representation_lr_method == "Barlow-Twins":
             backbone_model = self.model.feature
             from BarlowTwins import BarlowTwins, Transform
-            projection_sizes = [512, 512, 512, 512]
-            lambd = 0.5
-            self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=lambd, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
+            from config import default_config
+            import json
+            projection_sizes = json.loads(default_config['BarlowTwinsProjectionSizes'])
+            BarlowTwinsLambda = float(default_config['BarlowTwinsLambda'])
+            self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Transform(input_size)
+            self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
 
-        self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.parameters()),
+        if self.representation_model is not None:
+            self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.parameters()),
+                                    lr=learning_rate)
+        else:
+            self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) ,
                                     lr=learning_rate)
 
         self.rnd = self.rnd.to(self.device)
         self.model = self.model.to(self.device)
-        self.representation_model = self.representation_model.to(self.device)
+        if self.representation_model is not None:
+            self.representation_model = self.representation_model.to(self.device)
 
 
     def get_action(self, state):
@@ -233,7 +248,7 @@ class RNDAgent(object):
                 # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
-                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + forward_loss + representation_loss
+                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + forward_loss + self.representation_loss_coef * representation_loss
                 loss.backward()
                 global_grad_norm_(list(self.model.parameters())+list(self.rnd.predictor.parameters()))
                 self.optimizer.step()

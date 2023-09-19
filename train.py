@@ -49,7 +49,7 @@ def main():
     use_gae = default_config.getboolean('UseGAE')
     use_noisy_net = default_config.getboolean('UseNoisyNet')
 
-    lam = float(default_config['Lambda'])
+    GAE_Lambda = float(default_config['GAELambda'])
     num_worker = int(default_config['NumEnv'])
 
     num_step = int(default_config['NumStep'])
@@ -67,13 +67,14 @@ def main():
     int_coef = float(default_config['IntCoef'])
 
     sticky_action = default_config.getboolean('StickyAction')
+    stateStackSize = int(default_config['StateStackSize'])
     action_prob = float(default_config['ActionProb'])
     life_done = default_config.getboolean('LifeDone')
 
-    reward_rms = RunningMeanStd()
-    obs_rms = RunningMeanStd(shape=(1, 1, 84, 84))
+    reward_rms = RunningMeanStd() # used for normalizing intrinsic rewards
+    obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size)) # used for normalizing observations
     pre_obs_norm_step = int(default_config['ObsNormStep'])
-    discounted_reward = RewardForwardFilter(int_gamma)
+    discounted_reward = RewardForwardFilter(int_gamma) # gamma used for calculating Returns for the intrinsic rewards (i.e. R_i)
 
     agent = RNDAgent
 
@@ -90,7 +91,7 @@ def main():
         num_worker,
         num_step,
         gamma,
-        lam=lam,
+        GAE_Lambda=GAE_Lambda,
         learning_rate=learning_rate,
         ent_coef=entropy_coef,
         clip_grad_norm=clip_grad_norm,
@@ -135,13 +136,13 @@ def main():
     for idx in range(num_worker):
         parent_conn, child_conn = Pipe()
         work = env_type(env_id, is_render, idx, child_conn, sticky_action=sticky_action, p=action_prob,
-                        life_done=life_done)
+                        life_done=life_done, history_size=stateStackSize)
         work.start()
         works.append(work)
         parent_conns.append(parent_conn)
         child_conns.append(child_conn)
 
-    states = np.zeros([num_worker, 4, 84, 84])
+    states = np.zeros([num_worker, stateStackSize, input_size, input_size])
 
     sample_episode = 0
     sample_rall = 0
@@ -162,7 +163,7 @@ def main():
 
         for parent_conn in parent_conns:
             s, r, d, rd, lr = parent_conn.recv()
-            next_obs.append(s[3, :, :].reshape([1, 84, 84]))
+            next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
 
         if len(next_obs) % (num_step * num_worker) == 0:
             next_obs = np.stack(next_obs)
@@ -189,9 +190,9 @@ def main():
                 next_states.append(s)
                 rewards.append(r)
                 dones.append(d)
-                real_dones.append(rd)
-                log_rewards.append(lr)
-                next_obs.append(s[3, :, :].reshape([1, 84, 84]))
+                real_dones.append(rd) # --> [num_env]
+                log_rewards.append(lr) # --> [num_env]
+                next_obs.append(s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]))
 
             next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
             rewards = np.hstack(rewards) # -> [num_env, ]
@@ -205,7 +206,7 @@ def main():
             intrinsic_reward = np.hstack(intrinsic_reward)
             sample_i_rall += intrinsic_reward[sample_env_idx]
 
-            total_next_obs.append(next_obs)
+            total_next_obs.append(next_obs) # --> [num_step, num_env, state_stack_size, H, W]
             total_int_reward.append(intrinsic_reward)
             total_state.append(states)
             total_reward.append(rewards)
@@ -236,22 +237,22 @@ def main():
         total_int_values.append(value_int)
         # --------------------------------------------------
 
-        total_state = np.stack(total_state).transpose([1, 0, 2, 3, 4]).reshape([-1, 4, 84, 84])
-        total_reward = np.stack(total_reward).transpose().clip(-1, 1)
-        total_action = np.stack(total_action).transpose().reshape([-1])
-        total_done = np.stack(total_done).transpose()
-        total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, 1, 84, 84])
-        total_ext_values = np.stack(total_ext_values).transpose()
-        total_int_values = np.stack(total_int_values).transpose()
-        total_logging_policy = np.vstack(total_policy_np)
+        total_state = np.stack(total_state).transpose([1, 0, 2, 3, 4]).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
+        total_reward = np.stack(total_reward).transpose().clip(-1, 1) # --> [num_env, num_step]
+        total_action = np.stack(total_action).transpose().reshape([-1]) # --> [num_env * num_step]
+        total_done = np.stack(total_done).transpose() # --> [num_env, num_step]
+        total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, 1, input_size, input_size]) # --> [num_env * num_step, 1, H, W]
+        total_ext_values = np.stack(total_ext_values).transpose() # --> [num_env, (num_step + 1)]
+        total_int_values = np.stack(total_int_values).transpose() # --> [num_env, (num_step + 1)]
+        total_logging_policy = np.vstack(total_policy_np) # --> [num_env * num_step, output_size]
 
         # Step 2. calculate intrinsic reward
         # running mean intrinsic reward
-        total_int_reward = np.stack(total_int_reward).transpose()
+        total_int_reward = np.stack(total_int_reward).transpose() # --> [num_env, num_step]
         total_reward_per_env = np.array([discounted_reward.update(reward_per_step) for reward_per_step in
                                          total_int_reward.T])
         mean, std, count = np.mean(total_reward_per_env), np.std(total_reward_per_env), len(total_reward_per_env)
-        reward_rms.update_from_moments(mean, std ** 2, count)
+        reward_rms.update_from_moments(mean, std ** 2, count) # update reward normalization parameters using intrinsic rewards
 
         # normalize intrinsic reward
         total_int_reward /= np.sqrt(reward_rms.var)

@@ -20,3 +20,6 @@ test:
 
 kill:
 	killall python3
+
+start_tensorboard:
+	tensorboard --logdir runs

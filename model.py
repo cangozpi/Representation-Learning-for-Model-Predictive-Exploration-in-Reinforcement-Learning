@@ -72,6 +72,7 @@ class Flatten(nn.Module):
 
 
 class CnnActorCriticNetwork(nn.Module):
+    # Refer to: https://github.com/openai/random-network-distillation/blob/master/policies/cnn_policy_param_matched.py for the architecture
     def __init__(self, input_size, output_size, use_noisy_net=False):
         super(CnnActorCriticNetwork, self).__init__()
 
@@ -159,6 +160,7 @@ class CnnActorCriticNetwork(nn.Module):
 
 
 class RNDModel(nn.Module):
+    # Refer to: https://github.com/openai/random-network-distillation/blob/master/policies/cnn_policy_param_matched.py for the architecture
     def __init__(self, input_size, output_size):
         super(RNDModel, self).__init__()
 

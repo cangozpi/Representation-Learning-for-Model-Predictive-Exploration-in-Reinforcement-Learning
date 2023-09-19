@@ -10,7 +10,7 @@ from torch._six import inf
 #     num_step = int(default_config['NumStep'])
 
 use_gae = default_config.getboolean('UseGAE')
-lam = float(default_config['Lambda'])
+GAE_lambda = float(default_config['GAELambda'])
 train_method = default_config['TrainMethod']
 
 
@@ -22,7 +22,7 @@ def make_train_data(reward, done, value, gamma, num_step, num_worker):
         gae = np.zeros_like([num_worker, ])
         for t in range(num_step - 1, -1, -1):
             delta = reward[:, t] + gamma * value[:, t + 1] * (1 - done[:, t]) - value[:, t]
-            gae = delta + gamma * lam * (1 - done[:, t]) * gae
+            gae = delta + gamma * GAE_lambda * (1 - done[:, t]) * gae
 
             discounted_return[:, t] = gae + value[:, t]
 
@@ -31,7 +31,7 @@ def make_train_data(reward, done, value, gamma, num_step, num_worker):
 
     else:
         running_add = value[:, -1]
-        for t in range(num_step - 1, -1, -1):
+        for t in range(num_step - 1, -1, -1): # = [(num_step - 1), ..., 0]
             running_add = reward[:, t] + gamma * running_add * (1 - done[:, t])
             discounted_return[:, t] = running_add
 

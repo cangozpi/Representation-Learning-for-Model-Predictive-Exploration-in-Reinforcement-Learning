@@ -137,7 +137,8 @@ class AtariEnvironment(Environment):
             w=84,
             life_done=True,
             sticky_action=True,
-            p=0.25):
+            p=0.25,
+            stateStackSize=4):
         super(AtariEnvironment, self).__init__()
         self.daemon = True
         self.env = MaxAndSkipEnv(gym.make(env_id), is_render)
@@ -185,8 +186,8 @@ class AtariEnvironment(Environment):
             log_reward = reward
             force_done = done
 
-            self.history[:3, :, :] = self.history[1:, :, :]
-            self.history[3, :, :] = self.pre_proc(s)
+            self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
+            self.history[(self.history_size - 1), :, :] = self.pre_proc(s)
 
             self.rall += reward
             self.steps += 1
@@ -288,7 +289,7 @@ class MarioEnvironment(Process):
             # 4 frame skip
             reward = 0.0
             done = None
-            for i in range(4):
+            for i in range(self.history_size):
                 obs, r, done, info = self.env.step(action)
                 if self.is_render:
                     self.env.render()
@@ -314,8 +315,8 @@ class MarioEnvironment(Process):
 
             r = int(info.get('flag_get', False))
 
-            self.history[:3, :, :] = self.history[1:, :, :]
-            self.history[3, :, :] = self.pre_proc(obs)
+            self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
+            self.history[(self.history_size - 1), :, :] = self.pre_proc(obs)
 
             self.steps += 1
 

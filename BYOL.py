@@ -37,7 +37,7 @@ class Augment:
 
 
 class MLP(nn.Module):
-    def __init__(self, dim, embedding_size=256, hidden_size=2048, batch_norm_mlp=False):
+    def __init__(self, dim=2048, embedding_size=256, hidden_size=4096, batch_norm_mlp=True):
         super().__init__()
         norm = nn.BatchNorm1d(hidden_size) if batch_norm_mlp else nn.Identity()
         self.net = nn.Sequential(
@@ -52,7 +52,7 @@ class MLP(nn.Module):
 
 
 class AddProjHead(nn.Module):
-    def __init__(self, model, in_features, layer_name, hidden_size=4096,
+    def __init__(self, model, in_features=2048, hidden_size=4096,
                  embedding_size=256, batch_norm_mlp=True):
         super(AddProjHead, self).__init__()
         self.backbone = model
@@ -93,10 +93,9 @@ class BYOL(nn.Module):
             self,
             net,
             batch_norm_mlp=True,
-            layer_name='fc',
-            in_features=512,
+            in_features=2048,
             projection_size=256,
-            projection_hidden_size=2048,
+            projection_hidden_size=4096,
             moving_average_decay=0.99,
             use_momentum=True,
             use_cuda=False):
@@ -114,14 +113,13 @@ class BYOL(nn.Module):
         super().__init__()
         self.net = net
         self.online_model = AddProjHead(model=net, in_features=in_features,
-                                         layer_name=layer_name,
-                                         embedding_size=projection_size,
                                          hidden_size=projection_hidden_size,
+                                         embedding_size=projection_size,
                                          batch_norm_mlp=batch_norm_mlp)
         self.use_momentum = use_momentum
         self.target_model = self._get_target()
         self.target_ema_updater = EMA(moving_average_decay)
-        self.online_predictor = MLP(projection_size, projection_size, projection_hidden_size)
+        self.online_predictor = MLP(projection_size, projection_size, projection_size * 2)
 
         self.device = torch.device('cuda' if use_cuda else 'cpu')
         self.online_model = self.online_model.to(self.device)

@@ -9,7 +9,7 @@ import random
 
 
 class BarlowTwins(nn.Module):
-    def __init__(self, backbone, in_features=512, projection_sizes=[8192, 8192, 8192], lambd=0.5, use_cuda=False):
+    def __init__(self, backbone, in_features=2048, projection_sizes=[8192, 8192, 8192], lambd=0.0051, use_cuda=False):
         super().__init__()
         self.backbone = backbone
         self.lambd = lambd
