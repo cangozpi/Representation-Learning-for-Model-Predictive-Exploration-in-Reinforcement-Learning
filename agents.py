@@ -31,7 +31,8 @@ class RNDAgent(object):
             use_gae=True,
             use_cuda=False,
             use_noisy_net=False,
-            representation_lr_method="BYOL"):
+            representation_lr_method="BYOL",
+            logger=None):
         self.model = CnnActorCriticNetwork(input_size, output_size, use_noisy_net)
         self.num_env = num_env
         self.output_size = output_size
@@ -47,6 +48,7 @@ class RNDAgent(object):
         self.clip_grad_norm = clip_grad_norm
         self.update_proportion = update_proportion
         self.device = torch.device('cuda' if use_cuda else 'cpu')
+        self.logger = logger
 
         self.rnd = RNDModel(input_size, output_size)
         
@@ -119,7 +121,7 @@ class RNDAgent(object):
 
         return intrinsic_reward.data.cpu().numpy()
 
-    def train_model(self, s_batch, target_ext_batch, target_int_batch, y_batch, adv_batch, next_obs_batch, old_policy):
+    def train_model(self, s_batch, target_ext_batch, target_int_batch, y_batch, adv_batch, next_obs_batch, old_policy, global_update):
         s_batch = torch.FloatTensor(s_batch).to(self.device)
         target_ext_batch = torch.FloatTensor(target_ext_batch).to(self.device)
         target_int_batch = torch.FloatTensor(target_int_batch).to(self.device)
@@ -140,6 +142,7 @@ class RNDAgent(object):
 
         for i in range(self.epoch):
             np.random.shuffle(sample_range)
+            total_loss, total_actor_loss, total_critic_loss, total_entropy_loss, total_rnd_loss, total_representation_loss = [], [], [], [], [], []
             for j in range(int(len(s_batch) / self.batch_size)):
                 sample_idx = sample_range[self.batch_size * j:self.batch_size * (j + 1)]
 
@@ -147,11 +150,11 @@ class RNDAgent(object):
                 # for Curiosity-driven(Random Network Distillation)
                 predict_next_state_feature, target_next_state_feature = self.rnd(next_obs_batch[sample_idx])
 
-                forward_loss = forward_mse(predict_next_state_feature, target_next_state_feature.detach()).mean(-1)
+                rnd_loss = forward_mse(predict_next_state_feature, target_next_state_feature.detach()).mean(-1)
                 # Proportion of exp used for predictor update
-                mask = torch.rand(len(forward_loss)).to(self.device)
+                mask = torch.rand(len(rnd_loss)).to(self.device)
                 mask = (mask < self.update_proportion).type(torch.FloatTensor).to(self.device)
-                forward_loss = (forward_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
+                rnd_loss = (rnd_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
                 # ---------------------------------------------------------------------------------
 
 
@@ -248,11 +251,27 @@ class RNDAgent(object):
                 # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
-                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + forward_loss + self.representation_loss_coef * representation_loss
+                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss
                 loss.backward()
                 global_grad_norm_(list(self.model.parameters())+list(self.rnd.predictor.parameters()))
                 self.optimizer.step()
 
+                # logging
+                total_loss.append(loss.detach().cpu().item())
+                total_actor_loss.append(actor_loss.detach().cpu().item())
+                total_critic_loss.append(0.5 * critic_loss.detach().cpu().item())
+                total_entropy_loss.append(- self.ent_coef * entropy.detach().cpu().item())
+                total_rnd_loss.append(rnd_loss.detach().cpu().item())
+                total_representation_loss.append(self.representation_loss_coef * representation_loss.detach().cpu().item())
+
                 # EMA update BYOL target network params
                 if self.representation_lr_method == "BYOL":
                     self.representation_model.update_moving_average()
+            
+            # logging
+            self.logger.add_scalar('train/overall_loss (everything combined) vs parameter_update', np.mean(total_loss), global_update + i)
+            self.logger.add_scalar('train/PPO_actor_loss vs parameter_update', np.mean(total_actor_loss), global_update + i)
+            self.logger.add_scalar('train/PPO_critic_loss vs parameter_update', np.mean(total_critic_loss), global_update + i)
+            self.logger.add_scalar('train/PPO_entropy_loss vs parameter_update', np.mean(total_entropy_loss), global_update + i)
+            self.logger.add_scalar('train/RND_loss vs parameter_update', np.mean(total_rnd_loss), global_update + i)
+            self.logger.add_scalar(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)

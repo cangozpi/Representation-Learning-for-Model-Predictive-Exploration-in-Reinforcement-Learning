@@ -101,7 +101,8 @@ def main():
         use_cuda=use_cuda,
         use_gae=use_gae,
         use_noisy_net=use_noisy_net,
-        representation_lr_method=representation_lr_method
+        representation_lr_method=representation_lr_method,
+        logger=writer
     )
 
 
@@ -129,6 +130,17 @@ def main():
                 agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path, map_location='cpu'))
                 agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
         print('load finished!')
+
+    
+    agent_PPO_total_params = sum(p.numel() for p in agent.model.parameters())
+    agent_RND_predictor_total_params = sum(p.numel() for p in agent.rnd.predictor.parameters())
+    agent_representation_model_total_params = sum(p.numel() for p in agent.representation_model.parameters()) if agent.representation_model is not None else 0
+    print(f"{'*'*20}\
+        \nNumber of PPO parameters: {agent_PPO_total_params}\
+        \nNumber of RND_predictor parameters: {agent_RND_predictor_total_params}\
+        \nNumber of {representation_lr_method if representation_lr_method != 'None' else 'Representation Learning Model'} parameters: {agent_representation_model_total_params}\
+        \n{'*'*20}")
+
 
     works = []
     parent_conns = []
@@ -246,6 +258,10 @@ def main():
         total_int_values = np.stack(total_int_values).transpose() # --> [num_env, (num_step + 1)]
         total_logging_policy = np.vstack(total_policy_np) # --> [num_env * num_step, output_size]
 
+
+        # writer.add_scalar('data/mean_episodic_return (extrinsic) vs episode', np.sum(total_reward) / num_worker, sample_episode)
+        writer.add_scalar('data/mean_episodic_return (extrinsic) vs parameter_update', np.sum(total_reward) / num_worker, global_update)
+
         # Step 2. calculate intrinsic reward
         # running mean intrinsic reward
         total_int_reward = np.stack(total_int_reward).transpose() # --> [num_env, num_step]
@@ -256,12 +272,14 @@ def main():
 
         # normalize intrinsic reward
         total_int_reward /= np.sqrt(reward_rms.var)
-        writer.add_scalar('data/int_reward_per_epi', np.sum(total_int_reward) / num_worker, sample_episode)
-        writer.add_scalar('data/int_reward_per_rollout', np.sum(total_int_reward) / num_worker, global_update)
+        # writer.add_scalar('data/mean_episodic_return (intrinsic) vs episode', np.sum(total_int_reward) / num_worker, sample_episode)
+        writer.add_scalar('data/mean_episodic_return (intrinsic) vs parameter_update', np.sum(total_int_reward) / num_worker, global_update)
+        # writer.add_scalar('data/int_reward_per_epi', np.sum(total_int_reward) / num_worker, sample_episode)
+        # writer.add_scalar('data/int_reward_per_rollout', np.sum(total_int_reward) / num_worker, global_update)
         # -------------------------------------------------------------------------------------------
 
         # logging Max action probability
-        writer.add_scalar('data/max_prob', softmax(total_logging_policy).max(1).mean(), sample_episode)
+        writer.add_scalar('data/max_policy_action_prob vs episode', softmax(total_logging_policy).max(1).mean(), sample_episode)
 
         # Step 3. make target and advantage
         # extrinsic reward calculate
@@ -293,7 +311,7 @@ def main():
         print("YOOO ENTERED TRAINIG:JJ")
         agent.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
                           total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
-                          total_policy)
+                          total_policy, global_update)
         print("YOOO EXITTED TRAINIG:JJ")
 
         # if global_step % (num_worker * num_step * 100) == 0:
