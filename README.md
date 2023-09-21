@@ -29,6 +29,10 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
     ```bash
     make kill
     ```
+* Start Tensorboard Server:
+    ```bash
+    make start_tensorboard
+    ```
 
 
 ---

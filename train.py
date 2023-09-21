@@ -4,14 +4,17 @@ from utils import *
 from config import *
 from torch.multiprocessing import Pipe
 
-# from tensorboardX import SummaryWriter
-from torch.utils.tensorboard import SummaryWriter
-
 import numpy as np
+from utils import Logger, set_seed
+from os import path
 
 
-def main():
-    print({section: dict(config[section]) for section in config.sections()})
+def main(args):
+    set_seed(args['seed']) # Note: this will not seed the gym environment
+
+    logger = Logger(file_log_path=path.join("logs", "file_logs", args['log_name']), tb_log_path=path.join("logs", "tb_logs", args['log_name']))
+    logger.log_msg_to_both_console_and_file(str({section: dict(config[section]) for section in config.sections()}))
+
     train_method = default_config['TrainMethod']
     representation_lr_method = str(default_config['representationLearningMethod'])
 
@@ -37,13 +40,12 @@ def main():
 
     is_load_model = default_config.getboolean('loadModel')
     is_render = default_config.getboolean('render')
-    model_path = 'models/{}.model'.format(env_id)
-    predictor_path = 'models/{}.pred'.format(env_id)
-    target_path = 'models/{}.target'.format(env_id)
-    BYOL_model_path = 'models/{}.BYOLModelPath'.format(env_id)
-    BarlowTwins_model_path = 'models/{}.BarlowTwinsModelPath'.format(env_id)
+    model_path = '{}/{}.model'.format(args['load_model_path'], env_id)
+    predictor_path = '{}/{}.pred'.format(args['load_model_path'], env_id)
+    target_path = '{}/{}.target'.format(args['load_model_path'], env_id)
+    BYOL_model_path = '{}/{}.BYOLModel'.format(args['load_model_path'], env_id)
+    BarlowTwins_model_path = '{}/{}.BarlowTwinsModel'.format(args['load_model_path'], env_id)
 
-    writer = SummaryWriter()
 
     use_cuda = default_config.getboolean('UseGPU')
     use_gae = default_config.getboolean('UseGAE')
@@ -102,12 +104,12 @@ def main():
         use_gae=use_gae,
         use_noisy_net=use_noisy_net,
         representation_lr_method=representation_lr_method,
-        logger=writer
+        logger=logger
     )
 
 
     if is_load_model:
-        print('load model...')
+        logger.log_msg_to_both_console_and_file('load model...')
         if use_cuda:
             agent.model.load_state_dict(torch.load(model_path))
             agent.rnd.predictor.load_state_dict(torch.load(predictor_path))
@@ -129,13 +131,13 @@ def main():
             if representation_lr_method == "Barlow-Twins": # Barlow-Twins
                 agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path, map_location='cpu'))
                 agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-        print('load finished!')
+        logger.log_msg_to_both_console_and_file('load finished!')
 
     
     agent_PPO_total_params = sum(p.numel() for p in agent.model.parameters())
     agent_RND_predictor_total_params = sum(p.numel() for p in agent.rnd.predictor.parameters())
     agent_representation_model_total_params = sum(p.numel() for p in agent.representation_model.parameters()) if agent.representation_model is not None else 0
-    print(f"{'*'*20}\
+    logger.log_msg_to_both_console_and_file(f"{'*'*20}\
         \nNumber of PPO parameters: {agent_PPO_total_params}\
         \nNumber of RND_predictor parameters: {agent_RND_predictor_total_params}\
         \nNumber of {representation_lr_method if representation_lr_method != 'None' else 'Representation Learning Model'} parameters: {agent_representation_model_total_params}\
@@ -148,7 +150,7 @@ def main():
     for idx in range(num_worker):
         parent_conn, child_conn = Pipe()
         work = env_type(env_id, is_render, idx, child_conn, sticky_action=sticky_action, p=action_prob,
-                        life_done=life_done, history_size=stateStackSize)
+                        life_done=life_done, history_size=stateStackSize, seed=args['seed'], logger=logger)
         work.start()
         works.append(work)
         parent_conns.append(parent_conn)
@@ -165,7 +167,7 @@ def main():
     global_step = 0
 
     # normalize obs
-    print('Start to initialize observation normalization parameter.....')
+    logger.log_msg_to_both_console_and_file('Start to initialize observation normalization parameter.....')
     next_obs = []
     for step in range(num_step * pre_obs_norm_step):
         actions = np.random.randint(0, output_size, size=(num_worker,))
@@ -181,7 +183,7 @@ def main():
             next_obs = np.stack(next_obs)
             obs_rms.update(next_obs)
             next_obs = []
-    print('End to initialize...')
+    logger.log_msg_to_both_console_and_file('End to initialize...')
 
     while True:
         total_state, total_reward, total_done, total_next_state, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy, total_policy_np = \
@@ -236,9 +238,9 @@ def main():
             sample_step += 1
             if real_dones[sample_env_idx]:
                 sample_episode += 1
-                writer.add_scalar('data/reward_per_epi', sample_rall, sample_episode)
-                writer.add_scalar('data/reward_per_rollout', sample_rall, global_update)
-                writer.add_scalar('data/step', sample_step, sample_episode)
+                logger.log_scalar_to_tb_with_step('data/reward_per_epi', sample_rall, sample_episode)
+                logger.log_scalar_to_tb_with_step('data/reward_per_rollout', sample_rall, global_update)
+                logger.log_scalar_to_tb_with_step('data/step', sample_step, sample_episode)
                 sample_rall = 0
                 sample_step = 0
                 sample_i_rall = 0
@@ -260,7 +262,7 @@ def main():
 
 
         # writer.add_scalar('data/mean_episodic_return (extrinsic) vs episode', np.sum(total_reward) / num_worker, sample_episode)
-        writer.add_scalar('data/mean_episodic_return (extrinsic) vs parameter_update', np.sum(total_reward) / num_worker, global_update)
+        logger.log_scalar_to_tb_with_step('data/mean_episodic_return (extrinsic) vs parameter_update', np.sum(total_reward) / num_worker, global_update)
 
         # Step 2. calculate intrinsic reward
         # running mean intrinsic reward
@@ -273,13 +275,13 @@ def main():
         # normalize intrinsic reward
         total_int_reward /= np.sqrt(reward_rms.var)
         # writer.add_scalar('data/mean_episodic_return (intrinsic) vs episode', np.sum(total_int_reward) / num_worker, sample_episode)
-        writer.add_scalar('data/mean_episodic_return (intrinsic) vs parameter_update', np.sum(total_int_reward) / num_worker, global_update)
+        logger.log_scalar_to_tb_with_step('data/mean_episodic_return (intrinsic) vs parameter_update', np.sum(total_int_reward) / num_worker, global_update)
         # writer.add_scalar('data/int_reward_per_epi', np.sum(total_int_reward) / num_worker, sample_episode)
         # writer.add_scalar('data/int_reward_per_rollout', np.sum(total_int_reward) / num_worker, global_update)
         # -------------------------------------------------------------------------------------------
 
         # logging Max action probability
-        writer.add_scalar('data/max_policy_action_prob vs episode', softmax(total_logging_policy).max(1).mean(), sample_episode)
+        logger.log_scalar_to_tb_with_step('data/max_policy_action_prob vs episode', softmax(total_logging_policy).max(1).mean(), sample_episode)
 
         # Step 3. make target and advantage
         # extrinsic reward calculate
@@ -308,15 +310,15 @@ def main():
         # -----------------------------------------------
 
         # Step 5. Training!
-        print("YOOO ENTERED TRAINIG:JJ")
+        logger.log_msg_to_both_console_and_file("YOOO ENTERED TRAINIG:JJ")
         agent.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
                           total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
                           total_policy, global_update)
-        print("YOOO EXITTED TRAINIG:JJ")
+        logger.log_msg_to_both_console_and_file("YOOO EXITTED TRAINIG:JJ")
 
         # if global_step % (num_worker * num_step * 100) == 0:
         if True:
-            print('Now Global Step :{}'.format(global_step))
+            logger.log_msg_to_both_console_and_file('Global Step :{}'.format(global_step))
             torch.save(agent.model.state_dict(), model_path)
             torch.save(agent.rnd.predictor.state_dict(), predictor_path)
             torch.save(agent.rnd.target.state_dict(), target_path)
@@ -324,7 +326,3 @@ def main():
                 torch.save(agent.representation_model.state_dict(), BYOL_model_path)
             if representation_lr_method == "Barlow-Twins": # Barlow-Twins
                 torch.save(agent.representation_model.state_dict(), BarlowTwins_model_path)
-
-
-if __name__ == '__main__':
-    main()

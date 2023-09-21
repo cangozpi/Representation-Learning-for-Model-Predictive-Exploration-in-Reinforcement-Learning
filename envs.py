@@ -19,6 +19,8 @@ from config import *
 from PIL import Image
 import matplotlib.pyplot as plt
 
+from utils import Logger
+
 train_method = default_config['TrainMethod']
 max_step_per_episode = int(default_config['MaxStepPerEpisode'])
 
@@ -29,7 +31,7 @@ class Environment(Process):
         pass
 
     @abstractmethod
-    def reset(self):
+    def reset(self, seed):
         pass
 
     @abstractmethod
@@ -121,8 +123,8 @@ class MontezumaInfoWrapper(gym.Wrapper):
             self.visited_rooms.clear()
         return obs, rew, done, info
 
-    def reset(self):
-        return self.env.reset()
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
 
 
 class AtariEnvironment(Environment):
@@ -138,12 +140,15 @@ class AtariEnvironment(Environment):
             life_done=True,
             sticky_action=True,
             p=0.25,
-            stateStackSize=4):
+            stateStackSize=4,
+            seed=42,
+            logger:Logger=None):
         super(AtariEnvironment, self).__init__()
         self.daemon = True
         self.env = MaxAndSkipEnv(gym.make(env_id), is_render)
         if 'Montezuma' in env_id:
             self.env = MontezumaInfoWrapper(self.env, room_address=3 if 'Montezuma' in env_id else 1)
+        self.logger = logger
         self.env_id = env_id
         self.is_render = is_render
         self.env_idx = env_idx
@@ -162,7 +167,9 @@ class AtariEnvironment(Environment):
         self.h = h
         self.w = w
 
-        self.reset()
+        self.seed = seed
+
+        self.reset(seed=seed)
 
     def run(self):
         super(AtariEnvironment, self).run()
@@ -194,21 +201,21 @@ class AtariEnvironment(Environment):
 
             if done:
                 self.recent_rlist.append(self.rall)
-                print("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
+                self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
                     self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist),
                     info.get('episode', {}).get('visited_rooms', {})))
 
-                self.history = self.reset()
+                self.history = self.reset(seed=self.seed)
 
             self.child_conn.send(
                 [self.history[:, :, :], reward, force_done, done, log_reward])
 
-    def reset(self):
+    def reset(self, seed):
         self.last_action = 0
         self.steps = 0
         self.episode += 1
         self.rall = 0
-        s = self.env.reset()
+        s = self.env.reset(seed=seed)
         self.get_init_state(
             self.pre_proc(s))
         return self.history[:, :, :]
@@ -234,9 +241,12 @@ class MarioEnvironment(Process):
             life_done=False,
             h=84,
             w=84, movement=COMPLEX_MOVEMENT, sticky_action=True,
-            p=0.25):
+            p=0.25,
+            seed=42,
+            logger:Logger=None):
         super(MarioEnvironment, self).__init__()
         self.daemon = True
+        self.logger = logger
         self.env = BinarySpaceToDiscreteSpaceEnv(
             gym_super_mario_bros.make(env_id), COMPLEX_MOVEMENT)
 
@@ -258,7 +268,7 @@ class MarioEnvironment(Process):
         self.h = h
         self.w = w
 
-        self.reset()
+        self.reset(seed=self.seed)
 
         # custom rendering
         if self.is_render:
@@ -322,7 +332,7 @@ class MarioEnvironment(Process):
 
             if done:
                 self.recent_rlist.append(self.rall)
-                print(
+                self.logger.log_msg_to_both_console_and_file(
                     "[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Stage: {} current x:{}   max x:{}".format(
                         self.episode,
                         self.env_idx,
@@ -334,11 +344,11 @@ class MarioEnvironment(Process):
                         info['x_pos'],
                         self.max_pos))
 
-                self.history = self.reset()
+                self.history = self.reset(seed=self.seed)
 
             self.child_conn.send([self.history[:, :, :], r, force_done, done, log_reward])
 
-    def reset(self):
+    def reset(self, seed):
         self.last_action = 0
         self.steps = 0
         self.episode += 1
@@ -346,7 +356,7 @@ class MarioEnvironment(Process):
         self.lives = 3
         self.stage = 1
         self.max_pos = 0
-        self.get_init_state(self.env.reset())
+        self.get_init_state(self.env.reset(seed=seed))
         return self.history[:, :, :]
 
     def pre_proc(self, X):

@@ -13,13 +13,13 @@ docker_rm:
 	docker image rm rl_image
 
 train:
-	python3 train.py
+	python3 main.py --train
 
 test:
-	python3 eval.py
+	python3 main.py --eval
 
 kill:
 	killall python3
 
 start_tensorboard:
-	tensorboard --logdir runs
+	tensorboard --logdir logs/tb_logs

@@ -9,6 +9,7 @@ from torch.distributions.categorical import Categorical
 
 from model import CnnActorCriticNetwork, RNDModel
 from utils import global_grad_norm_
+from utils import Logger
 
 
 
@@ -32,7 +33,7 @@ class RNDAgent(object):
             use_cuda=False,
             use_noisy_net=False,
             representation_lr_method="BYOL",
-            logger=None):
+            logger:Logger=None):
         self.model = CnnActorCriticNetwork(input_size, output_size, use_noisy_net)
         self.num_env = num_env
         self.output_size = output_size
@@ -48,6 +49,7 @@ class RNDAgent(object):
         self.clip_grad_norm = clip_grad_norm
         self.update_proportion = update_proportion
         self.device = torch.device('cuda' if use_cuda else 'cpu')
+        assert isinstance(logger, Logger)
         self.logger = logger
 
         self.rnd = RNDModel(input_size, output_size)
@@ -262,16 +264,18 @@ class RNDAgent(object):
                 total_critic_loss.append(0.5 * critic_loss.detach().cpu().item())
                 total_entropy_loss.append(- self.ent_coef * entropy.detach().cpu().item())
                 total_rnd_loss.append(rnd_loss.detach().cpu().item())
-                total_representation_loss.append(self.representation_loss_coef * representation_loss.detach().cpu().item())
+                if self.representation_model is not None:
+                    total_representation_loss.append(self.representation_loss_coef * representation_loss.detach().cpu().item())
 
                 # EMA update BYOL target network params
                 if self.representation_lr_method == "BYOL":
                     self.representation_model.update_moving_average()
             
             # logging
-            self.logger.add_scalar('train/overall_loss (everything combined) vs parameter_update', np.mean(total_loss), global_update + i)
-            self.logger.add_scalar('train/PPO_actor_loss vs parameter_update', np.mean(total_actor_loss), global_update + i)
-            self.logger.add_scalar('train/PPO_critic_loss vs parameter_update', np.mean(total_critic_loss), global_update + i)
-            self.logger.add_scalar('train/PPO_entropy_loss vs parameter_update', np.mean(total_entropy_loss), global_update + i)
-            self.logger.add_scalar('train/RND_loss vs parameter_update', np.mean(total_rnd_loss), global_update + i)
-            self.logger.add_scalar(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)
+            if self.logger is not None:
+                self.logger.log_scalar_to_tb_with_step('train/overall_loss (everything combined) vs parameter_update', np.mean(total_loss), global_update + i)
+                self.logger.log_scalar_to_tb_with_step('train/PPO_actor_loss vs parameter_update', np.mean(total_actor_loss), global_update + i)
+                self.logger.log_scalar_to_tb_with_step('train/PPO_critic_loss vs parameter_update', np.mean(total_critic_loss), global_update + i)
+                self.logger.log_scalar_to_tb_with_step('train/PPO_entropy_loss vs parameter_update', np.mean(total_entropy_loss), global_update + i)
+                self.logger.log_scalar_to_tb_with_step('train/RND_loss vs parameter_update', np.mean(total_rnd_loss), global_update + i)
+                self.logger.log_scalar_to_tb_with_step(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)
