@@ -125,34 +125,34 @@ class RNDAgent(object):
 
         return intrinsic_reward.data.cpu().numpy()
 
-    def train_model(self, s_batch, target_ext_batch, target_int_batch, y_batch, adv_batch, next_obs_batch, old_policy, global_update):
-        s_batch = torch.FloatTensor(s_batch).to(self.device)
-        target_ext_batch = torch.FloatTensor(target_ext_batch).to(self.device)
-        target_int_batch = torch.FloatTensor(target_int_batch).to(self.device)
-        y_batch = torch.LongTensor(y_batch).to(self.device)
-        adv_batch = torch.FloatTensor(adv_batch).to(self.device)
-        next_obs_batch = torch.FloatTensor(next_obs_batch).to(self.device)
-
-        sample_range = np.arange(len(s_batch))
+    def train_model(self, states, target_ext, target_int, y, adv, next_obs, old_policy, global_update):
+        sample_range = np.arange(len(states))
         forward_mse = nn.MSELoss(reduction='none')
 
-        with torch.no_grad():
-            policy_old_list = torch.stack(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size).to(
-                self.device)
-
-            m_old = Categorical(F.softmax(policy_old_list, dim=-1))
-            log_prob_old = m_old.log_prob(y_batch)
             # ------------------------------------------------------------
 
         for i in range(self.epoch):
             np.random.shuffle(sample_range)
             total_loss, total_actor_loss, total_critic_loss, total_entropy_loss, total_rnd_loss, total_representation_loss = [], [], [], [], [], []
-            for j in range(int(len(s_batch) / self.batch_size)):
+            for j in range(int(len(states) / self.batch_size)):
                 sample_idx = sample_range[self.batch_size * j:self.batch_size * (j + 1)]
+
+                # Perform batching and sending to GPU:
+                s_batch = torch.FloatTensor(states)[sample_idx].to(self.device)
+                target_ext_batch = torch.FloatTensor(target_ext)[sample_idx].to(self.device)
+                target_int_batch = torch.FloatTensor(target_int)[sample_idx].to(self.device)
+                y_batch = torch.LongTensor(y)[sample_idx].to(self.device)
+                adv_batch = torch.FloatTensor(adv)[sample_idx].to(self.device)
+                next_obs_batch = torch.FloatTensor(next_obs)[sample_idx].to(self.device)
+                with torch.no_grad():
+                    policy_old_list = torch.stack(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[sample_idx].to(self.device)
+                    m_old = Categorical(F.softmax(policy_old_list, dim=-1))
+                    log_prob_old = m_old.log_prob(y_batch)
+
 
                 # --------------------------------------------------------------------------------
                 # for Curiosity-driven(Random Network Distillation)
-                predict_next_state_feature, target_next_state_feature = self.rnd(next_obs_batch[sample_idx])
+                predict_next_state_feature, target_next_state_feature = self.rnd(next_obs_batch)
 
                 rnd_loss = forward_mse(predict_next_state_feature, target_next_state_feature.detach()).mean(-1)
                 # Proportion of exp used for predictor update
@@ -167,8 +167,8 @@ class RNDAgent(object):
                 # for BYOL (Bootstrap Your Own Latent):
                 if self.representation_lr_method == "BYOL":
                     # sample image transformations and transform the images to obtain the 2 views
-                    B, STATE_STACK_SIZE, H, W = s_batch[sample_idx].shape
-                    s_batch_views = self.data_transform(torch.reshape(s_batch[sample_idx], [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    B, STATE_STACK_SIZE, H, W = s_batch.shape
+                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
                     s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
                         torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                 
@@ -181,13 +181,13 @@ class RNDAgent(object):
                             idx = np.random.choice(B)
                             print(idx)
                             fig, axs = plt.subplots(4, 2)
-                            axs[0,0].imshow(s_batch[sample_idx][idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[1,0].imshow(s_batch[sample_idx][idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[2,0].imshow(s_batch[sample_idx][idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[3,0].imshow(s_batch[sample_idx][idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             plt.show()
 
@@ -201,27 +201,27 @@ class RNDAgent(object):
                 # for Barlow-Twins:
                 if self.representation_lr_method == "Barlow-Twins":
                     # sample image transformations and transform the images to obtain the 2 views
-                    B, STATE_STACK_SIZE, H, W = s_batch[sample_idx].shape
-                    s_batch_views = self.data_transform(torch.reshape(s_batch[sample_idx], [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    B, STATE_STACK_SIZE, H, W = s_batch.shape
+                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
                     s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
                         torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                 
                     assert self.representation_model.backbone is self.model.feature # make sure that Barlow-Twins backbone and RL algo's feature extractor both point to the same network
 
                     # plot original frame vs transformed views for debugging purposes
-                    if True:
+                    if False:
                         import matplotlib.pyplot as plt
                         for i in range(4):
                             idx = np.random.choice(B)
                             print(idx)
                             fig, axs = plt.subplots(4, 2)
-                            axs[0,0].imshow(s_batch[sample_idx][idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[1,0].imshow(s_batch[sample_idx][idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[2,0].imshow(s_batch[sample_idx][idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[3,0].imshow(s_batch[sample_idx][idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             plt.show()
 
@@ -233,21 +233,21 @@ class RNDAgent(object):
 
                 # --------------------------------------------------------------------------------
                 # for Proximal Policy Optimization(PPO):
-                policy, value_ext, value_int = self.model(s_batch[sample_idx])
+                policy, value_ext, value_int = self.model(s_batch)
                 m = Categorical(F.softmax(policy, dim=-1))
-                log_prob = m.log_prob(y_batch[sample_idx])
+                log_prob = m.log_prob(y_batch)
 
-                ratio = torch.exp(log_prob - log_prob_old[sample_idx])
+                ratio = torch.exp(log_prob - log_prob_old)
 
-                surr1 = ratio * adv_batch[sample_idx]
+                surr1 = ratio * adv_batch
                 surr2 = torch.clamp(
                     ratio,
                     1.0 - self.ppo_eps,
-                    1.0 + self.ppo_eps) * adv_batch[sample_idx]
+                    1.0 + self.ppo_eps) * adv_batch
 
                 actor_loss = -torch.min(surr1, surr2).mean()
-                critic_ext_loss = F.mse_loss(value_ext.sum(1), target_ext_batch[sample_idx])
-                critic_int_loss = F.mse_loss(value_int.sum(1), target_int_batch[sample_idx])
+                critic_ext_loss = F.mse_loss(value_ext.sum(1), target_ext_batch)
+                critic_int_loss = F.mse_loss(value_int.sum(1), target_int_batch)
 
                 critic_loss = critic_ext_loss + critic_int_loss
 
