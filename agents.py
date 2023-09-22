@@ -67,8 +67,9 @@ class RNDAgent(object):
             BYOL_projection_hidden_size = int(default_config['BYOL_projectionHiddenSize'])
             BYOL_projection_size = int(default_config['BYOL_projectionSize'])
             BYOL_moving_average_decay = float(default_config['BYOL_movingAverageDecay'])
+            apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
             self.representation_model = BYOL(backbone_model, in_features=448, projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
-            self.data_transform = Augment(input_size)
+            self.data_transform = Augment(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BYOL_representationLossCoef'])
         # --------------------------------------------------------------------------------
 
@@ -81,8 +82,9 @@ class RNDAgent(object):
             import json
             projection_sizes = json.loads(default_config['BarlowTwinsProjectionSizes'])
             BarlowTwinsLambda = float(default_config['BarlowTwinsLambda'])
+            apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
             self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
-            self.data_transform = Transform(input_size)
+            self.data_transform = Transform(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
 
@@ -165,8 +167,8 @@ class RNDAgent(object):
                 # for BYOL (Bootstrap Your Own Latent):
                 if self.representation_lr_method == "BYOL":
                     # sample image transformations and transform the images to obtain the 2 views
-                    B, STATE_STACK_SIZE, H, W = s_batch.shape
-                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    B, STATE_STACK_SIZE, H, W = s_batch[sample_idx].shape
+                    s_batch_views = self.data_transform(torch.reshape(s_batch[sample_idx], [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
                     s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
                         torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                 
@@ -179,13 +181,13 @@ class RNDAgent(object):
                             idx = np.random.choice(B)
                             print(idx)
                             fig, axs = plt.subplots(4, 2)
-                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[0,0].imshow(s_batch[sample_idx][idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,0].imshow(s_batch[sample_idx][idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,0].imshow(s_batch[sample_idx][idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,0].imshow(s_batch[sample_idx][idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             plt.show()
 
@@ -199,27 +201,27 @@ class RNDAgent(object):
                 # for Barlow-Twins:
                 if self.representation_lr_method == "Barlow-Twins":
                     # sample image transformations and transform the images to obtain the 2 views
-                    B, STATE_STACK_SIZE, H, W = s_batch.shape
-                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    B, STATE_STACK_SIZE, H, W = s_batch[sample_idx].shape
+                    s_batch_views = self.data_transform(torch.reshape(s_batch[sample_idx], [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
                     s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
                         torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                 
                     assert self.representation_model.backbone is self.model.feature # make sure that Barlow-Twins backbone and RL algo's feature extractor both point to the same network
 
                     # plot original frame vs transformed views for debugging purposes
-                    if False:
+                    if True:
                         import matplotlib.pyplot as plt
                         for i in range(4):
                             idx = np.random.choice(B)
                             print(idx)
                             fig, axs = plt.subplots(4, 2)
-                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[0,0].imshow(s_batch[sample_idx][idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[1,0].imshow(s_batch[sample_idx][idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[2,0].imshow(s_batch[sample_idx][idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[3,0].imshow(s_batch[sample_idx][idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             plt.show()
 

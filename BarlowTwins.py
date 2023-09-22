@@ -77,51 +77,79 @@ class Solarization(object): # from facebookresearch code
 
 
 class Transform:
-    def __init__(self, img_size=224):
-        self.transform = transforms.Compose([
-            transforms.RandomResizedCrop(img_size, interpolation=Image.BICUBIC),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomApply(
-                [transforms.ColorJitter(brightness=0.4, contrast=0.4,
-                                        saturation=0.2, hue=0.1)],
-                p=0.8
-            ),
-            # transforms.RandomGrayscale(p=0.2),
+    def __init__(self, img_size=224, apply_same_transform_to_batch=True):
+        """
+        apply_same_transformation_to_batch (bool): if False, then a new transformation is sampled per each element in the batch,
+        otherwise (True) only one transformation is sampled per batch.
+        """
+        if apply_same_transform_to_batch:
+            blur = transforms.GaussianBlur((3, 3), (0.1, 2.0))
 
-            # Facebook's GaussianBlur method cannot process batches of img tensors hence swapped it with transforms.* equivalent
-            # GaussianBlur(p=1.0),
-            # transforms.GaussianBlur(kernel_size=3),
+            self.transform = transforms.Compose([
+                transforms.RandomResizedCrop(img_size, interpolation=Image.BICUBIC),
+                transforms.RandomHorizontalFlip(p=0.5),
+                # T.RandomApply([color_jitter], p=0.8),
+                # GaussianBlur(p=0.1),
+                transforms.RandomApply([blur], p=0.1),
+                # transforms.RandomApply(
+                #     [transforms.ColorJitter(brightness=0.4, contrast=0.4,
+                #                             saturation=0.2, hue=0.1)],
+                #     p=0.8
+                # ),
+                # transforms.RandomGrayscale(p=0.2),
 
-            # Facebook's RandomSolarize method cannot process batches of img tensors hence swapped it with transforms.* equivalent
-            # Solarization(p=0.0),
-            # transforms.RandomSolarize(threshold=128, p=0.0),
+                # Facebook's GaussianBlur method cannot process batches of img tensors hence swapped it with transforms.* equivalent
+                # GaussianBlur(p=1.0),
+                # transforms.GaussianBlur(kernel_size=3),
 
-            # transforms.ToTensor(),
-            # transforms.Normalize(mean=[0.485, 0.456, 0.406],
-            #                      std=[0.229, 0.224, 0.225])
-        ])
-        self.transform_prime = transforms.Compose([
-            transforms.RandomResizedCrop(img_size, interpolation=Image.BICUBIC),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomApply(
-                [transforms.ColorJitter(brightness=0.4, contrast=0.4,
-                                        saturation=0.2, hue=0.1)],
-                p=0.8
-            ),
-            # transforms.RandomGrayscale(p=0.2),
+                # Facebook's RandomSolarize method cannot process batches of img tensors hence swapped it with transforms.* equivalent
+                # Solarization(p=0.0),
+                # transforms.RandomSolarize(threshold=128, p=0.0),
 
-            # Facebook's GaussianBlur method cannot process batches of img tensors hence swapped it with transforms.* equivalent
-            # GaussianBlur(p=0.1),
-            # transforms.GaussianBlur(kernel_size=3),
+                # transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                #                      std=[0.229, 0.224, 0.225])
+            ])
+            self.transform_prime = transforms.Compose([
+                transforms.RandomResizedCrop(img_size, interpolation=Image.BICUBIC),
+                transforms.RandomHorizontalFlip(p=0.5),
+                # transforms.RandomApply(
+                #     [transforms.ColorJitter(brightness=0.4, contrast=0.4,
+                #                             saturation=0.2, hue=0.1)],
+                #     p=0.8
+                # ),
+                # transforms.RandomGrayscale(p=0.2),
+                # T.RandomApply([color_jitter], p=0.8),
 
-            # Facebook's RandomSolarize method cannot process batches of img tensors hence swapped it with transforms.* equivalent
-            # Solarization(p=0.2),
-            # transforms.RandomSolarize(threshold=128, p=0.2),
+                # Facebook's GaussianBlur method cannot process batches of img tensors hence swapped it with transforms.* equivalent
+                # GaussianBlur(p=0.1),
+                transforms.RandomApply([blur], p=0.1),
 
-            # transforms.ToTensor(),
-            # transforms.Normalize(mean=[0.485, 0.456, 0.406],
-            #                      std=[0.229, 0.224, 0.225])
-        ])
+                # Facebook's RandomSolarize method cannot process batches of img tensors hence swapped it with transforms.* equivalent
+                # Solarization(p=0.2),
+                # transforms.RandomSolarize(threshold=128, p=0.2),
+
+                # transforms.ToTensor(),
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                #                      std=[0.229, 0.224, 0.225])
+            ])
+        else:
+            import kornia.augmentation as aug
+            from kornia.constants import Resample
+            self.transform = nn.Sequential(
+                aug.RandomResizedCrop((img_size, img_size), resample=Resample.BICUBIC, same_on_batch=apply_same_transform_to_batch),
+                aug.RandomHorizontalFlip(p=0.5, same_on_batch=apply_same_transform_to_batch),
+                # aug.ColorJiggle(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1, p=0.8, same_on_batch=apply_same_transform_to_batch), # this does not work properly for grayscale images !
+                # aug.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1, p=0.8, same_on_batch=apply_same_transform_to_batch), # this does not work properly for grayscale images !
+                aug.RandomGaussianBlur((3, 3), (0.1, 2.0), p=0.1, same_on_batch=apply_same_transform_to_batch)
+            )
+            self.transform_prime = nn.Sequential(
+                aug.RandomResizedCrop((img_size, img_size), resample=Resample.BICUBIC, same_on_batch=apply_same_transform_to_batch),
+                aug.RandomHorizontalFlip(p=0.5, same_on_batch=apply_same_transform_to_batch),
+                # aug.ColorJiggle(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1, p=0.8, same_on_batch=apply_same_transform_to_batch), # this does not work properly for grayscale images !
+                # aug.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1, p=0.8, same_on_batch=apply_same_transform_to_batch), # this does not work properly for grayscale images !
+                aug.RandomGaussianBlur((3, 3), (0.1, 2.0), p=0.1, same_on_batch=apply_same_transform_to_batch)
+            )
 
     def __call__(self, x):
         y1 = self.transform(x)

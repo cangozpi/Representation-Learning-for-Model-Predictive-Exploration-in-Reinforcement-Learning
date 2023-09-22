@@ -13,23 +13,46 @@ class Augment:
     Transforms any given data example randomly
     resulting in two correlated views of the same example,
     denoted x ̃i and x ̃j, which we consider as a positive pair.
+    Can either sample a transformation per each element in the batch,
+    or sample a transformation per batch.
     """
-    def __init__(self, img_size=224, s=1):
-        color_jitter = T.ColorJitter(
-            0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s
-        )
-        blur = T.GaussianBlur((3, 3), (0.1, 2.0))
+    def __init__(self, img_size=224, s=1, apply_same_transform_to_batch=True):
+        """
+        apply_same_transformation_to_batch (bool): if False, then a new transformation is sampled per each element in the batch,
+        otherwise (True) only one transformation is sampled per batch.
+        """
+        if apply_same_transform_to_batch:
+            color_jitter = T.ColorJitter(
+                0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s
+            )
+            blur = T.GaussianBlur((3, 3), (0.1, 2.0))
 
-        self.train_transform = T.Compose([
-            # T.ToTensor(),
-            T.RandomResizedCrop(size=img_size),
-            T.RandomHorizontalFlip(p=0.5),  # with 0.5 probability
-            T.RandomApply([color_jitter], p=0.8),
-            T.RandomApply([blur], p=0.5),
-            # T.RandomGrayscale(p=0.2),
-            # imagenet stats
-            # T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])            
-        ])
+            transforms = [
+                # T.ToTensor(),
+                T.RandomResizedCrop(size=img_size),
+                T.RandomHorizontalFlip(p=0.5),  # with 0.5 probability
+                # T.RandomApply([color_jitter], p=0.8),
+                T.RandomApply([blur], p=0.5),
+                # T.RandomGrayscale(p=0.2),
+                # imagenet stats
+                # T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])            
+            ]
+            self.train_transform = T.Compose(transforms)
+        else:
+            import kornia.augmentation as aug
+            transforms = [
+                aug.RandomResizedCrop((img_size, img_size), same_on_batch=apply_same_transform_to_batch),
+                aug.RandomHorizontalFlip(p=0.5, same_on_batch=apply_same_transform_to_batch),
+                # aug.ColorJiggle(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s, p=0.8, same_on_batch=apply_same_transform_to_batch), # this does not work properly for grayscale images !
+                # aug.ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s, p=0.8, same_on_batch=apply_same_transform_to_batch), # this does not work properly for grayscale images !
+                aug.RandomGaussianBlur((3, 3), (0.1, 2.0), p=0.5, same_on_batch=apply_same_transform_to_batch)
+                # --
+                # aug.RandomCrop((img_size - 10, img_size - 10), same_on_batch=apply_same_transform_to_batch),
+                # nn.ReplicationPad2d(10),
+                # aug.RandomCrop((img_size, img_size), same_on_batch=apply_same_transform_to_batch)
+                # --
+            ]
+            self.train_transform = nn.Sequential(*transforms)
 
     def __call__(self, x):
         return self.train_transform(x), self.train_transform(x)
