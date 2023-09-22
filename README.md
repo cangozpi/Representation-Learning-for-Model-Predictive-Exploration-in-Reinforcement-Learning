@@ -34,6 +34,19 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
     make start_tensorboard
     ```
 
+    ---
+* Train RND only:
+    ```bash
+    python3 main.py --train --config_path=config_rnd.conf --log_name=rnd00
+    ```
+* Train RND + BYOL:
+    ```bash
+    python3 main.py --train --config_path=config_byol.conf --log_name=byol00
+    ```
+* Train RND + Barlow-Twins:
+    ```bash
+    python3 main.py --train --config_path=config_barlowTwins.conf --log_name=barlowTwins00
+    ```
 
 ---
 
