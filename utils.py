@@ -22,6 +22,9 @@ from os import path
 use_gae = default_config.getboolean('UseGAE')
 GAE_lambda = float(default_config['GAELambda'])
 
+def init_tb_global_step():
+    return 0
+
 
 def make_train_data(reward, done, value, gamma, num_step, num_worker):
 
@@ -191,11 +194,10 @@ class Logger:
 
         # Initialize TensorBoard --------------------------------------------------------------------
         if tb_log_path is not None:
-            # log_file_dir = '/'.join(log_file_name.split('/')[:-1])
-            run_name =  datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            # run_name =  datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             self.tb_summaryWriter = SummaryWriter(tb_log_path)
 
-            self.tb_global_steps = defaultdict(lambda : 0)
+            self.tb_global_steps = defaultdict(init_tb_global_step)
 
     def log_msg_to_console(self, msg):
         """

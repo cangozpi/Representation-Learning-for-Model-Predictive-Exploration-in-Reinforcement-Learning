@@ -15,7 +15,7 @@ def main(args):
     set_seed(args['seed']) # Note: this will not seed the gym environment
 
     logger = Logger(file_log_path=path.join("logs", "file_logs", args['log_name']), tb_log_path=path.join("logs", "tb_logs", args['log_name']))
-    logger.log_msg_to_both_console_and_file(str({section: dict(config[section]) for section in config.sections()}))
+    logger.log_msg_to_both_console_and_file(str(dict(**{section: dict(config[section]) for section in config.sections()}, **args)))
 
     representation_lr_method = str(default_config['representationLearningMethod'])
     env_id = default_config['EnvID']
@@ -39,12 +39,9 @@ def main(args):
 
     env.close()
 
+    is_load_model = True
     is_render = True
-    model_path = '{}/{}.model'.format(args['load_model_path'], env_id)
-    predictor_path = '{}/{}.pred'.format(args['load_model_path'], env_id)
-    target_path = '{}/{}.target'.format(args['load_model_path'], env_id)
-    BYOL_model_path = '{}/{}.BYOLModel'.format(args['load_model_path'], env_id)
-    BarlowTwins_model_path = '{}/{}.BarlowTwinsModel'.format(args['load_model_path'], env_id)
+    load_ckpt_path = '{}'.format(args['load_model_path']) # path for resuming a training from a checkpoint
 
     use_cuda = default_config.getboolean('UseGPU')
     use_gae = default_config.getboolean('UseGAE')
@@ -98,29 +95,35 @@ def main(args):
         logger=logger
     )
 
-    logger.log_msg_to_both_console_and_file('Loading Pre-trained model....')
-    if use_cuda:
-        agent.model.load_state_dict(torch.load(model_path))
-        agent.rnd.predictor.load_state_dict(torch.load(predictor_path))
-        agent.rnd.target.load_state_dict(torch.load(target_path))
-        if representation_lr_method == "BYOL": # BYOL
-            agent.representation_model.load_state_dict(torch.load(BYOL_model_path))
-            agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-        if representation_lr_method == "Barlow-Twins": # Barlow-Twins
-            agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path))
-            agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
 
-    else:
-        agent.model.load_state_dict(torch.load(model_path, map_location='cpu'))
-        agent.rnd.predictor.load_state_dict(torch.load(predictor_path, map_location='cpu'))
-        agent.rnd.target.load_state_dict(torch.load(target_path, map_location='cpu'))
-        if representation_lr_method == "BYOL": # BYOL
-            agent.representation_model.load_state_dict(torch.load(BYOL_model_path, map_location='cpu'))
-            agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-        if representation_lr_method == "Barlow-Twins": # Barlow-Twins
-            agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path, map_location='cpu'))
-            agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-    logger.log_msg_to_both_console_and_file('End load...')
+    if is_load_model:
+        logger.log_msg_to_both_console_and_file(f'loading from checkpoint: {load_ckpt_path}')
+        if use_cuda:
+            load_checkpoint = torch.load(load_ckpt_path)
+            agent.model.load_state_dict(load_checkpoint['agent.model.state_dict'])
+            agent.rnd.predictor.load_state_dict(load_checkpoint['agent.rnd.predictor.state_dict'])
+            agent.rnd.target.load_state_dict(load_checkpoint['agent.rnd.target.state_dict'])
+            if representation_lr_method == "BYOL": # BYOL
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
+                agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+            if representation_lr_method == "Barlow-Twins": # Barlow-Twins
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
+                agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+
+        else:
+            load_checkpoint = torch.load(load_ckpt_path, map_location='cpu')
+            agent.model.load_state_dict(load_checkpoint['agent.model.state_dict'])
+            agent.rnd.predictor.load_state_dict(load_checkpoint['agent.rnd.predictor.state_dict'])
+            agent.rnd.target.load_state_dict(load_checkpoint['agent.rnd.target.state_dict'])
+            if representation_lr_method == "BYOL": # BYOL
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
+                agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+            if representation_lr_method == "Barlow-Twins": # Barlow-Twins
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
+                agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+
+        logger.log_msg_to_both_console_and_file('loading finished!')
+
 
     works = []
     parent_conns = []

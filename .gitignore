@@ -1,8 +1,10 @@
 # Logs
-logs
+!logs
+logs/*
 *.log
 __pycache__/
-models/*
+checkpoints/*
+*.ckpt
 !models/.gitkeep
 runs/
 # Runtime data

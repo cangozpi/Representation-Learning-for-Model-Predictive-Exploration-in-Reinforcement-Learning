@@ -13,7 +13,7 @@ def main(args):
     set_seed(args['seed']) # Note: this will not seed the gym environment
 
     logger = Logger(file_log_path=path.join("logs", "file_logs", args['log_name']), tb_log_path=path.join("logs", "tb_logs", args['log_name']))
-    logger.log_msg_to_both_console_and_file(str({section: dict(config[section]) for section in config.sections()}))
+    logger.log_msg_to_both_console_and_file(str(dict(**{section: dict(config[section]) for section in config.sections()}, **args)))
 
     train_method = default_config['TrainMethod']
     representation_lr_method = str(default_config['representationLearningMethod'])
@@ -40,12 +40,8 @@ def main(args):
 
     is_load_model = default_config.getboolean('loadModel')
     is_render = default_config.getboolean('render')
-    model_path = '{}/{}.model'.format(args['load_model_path'], env_id)
-    predictor_path = '{}/{}.pred'.format(args['load_model_path'], env_id)
-    target_path = '{}/{}.target'.format(args['load_model_path'], env_id)
-    BYOL_model_path = '{}/{}.BYOLModel'.format(args['load_model_path'], env_id)
-    BarlowTwins_model_path = '{}/{}.BarlowTwinsModel'.format(args['load_model_path'], env_id)
-
+    load_ckpt_path = '{}'.format(args['load_model_path']) # path for resuming a training from a checkpoint
+    save_ckpt_path = '{}'.format(args['save_model_path']) # path for saving a training from to a checkpoint
 
     use_cuda = default_config.getboolean('UseGPU')
     use_gae = default_config.getboolean('UseGAE')
@@ -107,31 +103,50 @@ def main(args):
         logger=logger
     )
 
+    sample_episode = 0
+    sample_rall = 0
+    sample_step = 0
+    sample_env_idx = 0
+    sample_i_rall = 0
+    global_update = 0
+    global_step = 0
 
     if is_load_model:
-        logger.log_msg_to_both_console_and_file('load model...')
+        logger.log_msg_to_both_console_and_file(f'loading from checkpoint: {load_ckpt_path}')
         if use_cuda:
-            agent.model.load_state_dict(torch.load(model_path))
-            agent.rnd.predictor.load_state_dict(torch.load(predictor_path))
-            agent.rnd.target.load_state_dict(torch.load(target_path))
+            load_checkpoint = torch.load(load_ckpt_path)
+            agent.model.load_state_dict(load_checkpoint['agent.model.state_dict'])
+            agent.rnd.predictor.load_state_dict(load_checkpoint['agent.rnd.predictor.state_dict'])
+            agent.rnd.target.load_state_dict(load_checkpoint['agent.rnd.target.state_dict'])
             if representation_lr_method == "BYOL": # BYOL
-                agent.representation_model.load_state_dict(torch.load(BYOL_model_path))
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
             if representation_lr_method == "Barlow-Twins": # Barlow-Twins
-                agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path))
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
+            agent.optimizer.load_state_dict(load_checkpoint['agent.optimizer.state_dict'])
 
         else:
-            agent.model.load_state_dict(torch.load(model_path, map_location='cpu'))
-            agent.rnd.predictor.load_state_dict(torch.load(predictor_path, map_location='cpu'))
-            agent.rnd.target.load_state_dict(torch.load(target_path, map_location='cpu'))
+            load_checkpoint = torch.load(load_ckpt_path, map_location='cpu')
+            agent.model.load_state_dict(load_checkpoint['agent.model.state_dict'])
+            agent.rnd.predictor.load_state_dict(load_checkpoint['agent.rnd.predictor.state_dict'])
+            agent.rnd.target.load_state_dict(load_checkpoint['agent.rnd.target.state_dict'])
             if representation_lr_method == "BYOL": # BYOL
-                agent.representation_model.load_state_dict(torch.load(BYOL_model_path, map_location='cpu'))
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
             if representation_lr_method == "Barlow-Twins": # Barlow-Twins
-                agent.representation_model.load_state_dict(torch.load(BarlowTwins_model_path, map_location='cpu'))
+                agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-        logger.log_msg_to_both_console_and_file('load finished!')
+            agent.optimizer.load_state_dict(load_checkpoint['agent.optimizer.state_dict'])
+
+        obs_rms = load_checkpoint['obs_rms']
+        reward_rms = load_checkpoint['reward_rms']
+        sample_episode = load_checkpoint['sample_episode']
+        global_update = load_checkpoint['global_update']
+        global_step = load_checkpoint['global_step']
+        logger.tb_global_steps = load_checkpoint['logger.tb_global_steps']
+
+        logger.log_msg_to_both_console_and_file('loading finished!')
 
     
     agent_PPO_total_params = sum(p.numel() for p in agent.model.parameters())
@@ -158,32 +173,26 @@ def main(args):
 
     states = np.zeros([num_worker, stateStackSize, input_size, input_size])
 
-    sample_episode = 0
-    sample_rall = 0
-    sample_step = 0
-    sample_env_idx = 0
-    sample_i_rall = 0
-    global_update = 0
-    global_step = 0
 
     # normalize obs
-    logger.log_msg_to_both_console_and_file('Start to initialize observation normalization parameter.....')
-    next_obs = []
-    for step in range(num_step * pre_obs_norm_step):
-        actions = np.random.randint(0, output_size, size=(num_worker,))
+    if is_load_model == False:
+        logger.log_msg_to_both_console_and_file('Start to initialize observation normalization parameter.....')
+        next_obs = []
+        for step in range(num_step * pre_obs_norm_step):
+            actions = np.random.randint(0, output_size, size=(num_worker,))
 
-        for parent_conn, action in zip(parent_conns, actions):
-            parent_conn.send(action)
+            for parent_conn, action in zip(parent_conns, actions):
+                parent_conn.send(action)
 
-        for parent_conn in parent_conns:
-            s, r, d, rd, lr = parent_conn.recv()
-            next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
+            for parent_conn in parent_conns:
+                s, r, d, rd, lr = parent_conn.recv()
+                next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
 
-        if len(next_obs) % (num_step * num_worker) == 0:
-            next_obs = np.stack(next_obs)
-            obs_rms.update(next_obs)
-            next_obs = []
-    logger.log_msg_to_both_console_and_file('End to initialize...')
+            if len(next_obs) % (num_step * num_worker) == 0:
+                next_obs = np.stack(next_obs)
+                obs_rms.update(next_obs)
+                next_obs = []
+        logger.log_msg_to_both_console_and_file('End to initialize...')
 
     while True:
         total_state, total_reward, total_done, total_next_state, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy, total_policy_np = \
@@ -310,19 +319,33 @@ def main(args):
         # -----------------------------------------------
 
         # Step 5. Training!
-        logger.log_msg_to_both_console_and_file("YOOO ENTERED TRAINIG:JJ")
+        logger.log_msg_to_both_console_and_file("ENTERED TRAINING:")
         agent.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
                           total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
                           total_policy, global_update)
-        logger.log_msg_to_both_console_and_file("YOOO EXITTED TRAINIG:JJ")
+        logger.log_msg_to_both_console_and_file("EXITTED TRAINING")
 
         # if global_step % (num_worker * num_step * 100) == 0:
-        if True:
-            logger.log_msg_to_both_console_and_file('Global Step :{}'.format(global_step))
-            torch.save(agent.model.state_dict(), model_path)
-            torch.save(agent.rnd.predictor.state_dict(), predictor_path)
-            torch.save(agent.rnd.target.state_dict(), target_path)
-            if representation_lr_method == "BYOL": # BYOL
-                torch.save(agent.representation_model.state_dict(), BYOL_model_path)
-            if representation_lr_method == "Barlow-Twins": # Barlow-Twins
-                torch.save(agent.representation_model.state_dict(), BarlowTwins_model_path)
+        if True: # TODO: comment this line and uncomment the one above
+            ckpt_dict = {
+                **{
+                    'agent.optimizer.state_dict': agent.optimizer.state_dict(),
+                    'agent.model.state_dict': agent.model.state_dict(),
+                    'agent.rnd.predictor.state_dict': agent.rnd.predictor.state_dict(),
+                    'agent.rnd.target.state_dict': agent.rnd.target.state_dict(),
+                },
+                **({'agent.representation_model.state_dict': agent.representation_model.state_dict()} if representation_lr_method == "BYOL" else {}),
+                **({'agent.representation_model.state_dict': agent.representation_model.state_dict()} if representation_lr_method == "Barlow-Twins" else {}),
+                **{
+                    'sample_episode': sample_episode,
+                    'global_update': global_update,
+                    'global_step': global_step,
+                    'obs_rms': obs_rms,
+                    'reward_rms': reward_rms,
+                },
+                **({'logger.tb_global_steps': logger.tb_global_steps})
+            }
+            os.makedirs('/'.join(save_ckpt_path.split('/')[:-1]), exist_ok=True)
+            torch.save(ckpt_dict, save_ckpt_path)
+            logger.log_msg_to_both_console_and_file('Saved ckpt at Global Step :{}'.format(global_step))
+
