@@ -135,6 +135,17 @@ def main(args):
         logger.log_msg_to_both_console_and_file('loading finished!')
 
 
+    agent_PPO_total_params = sum(p.numel() for p in agent.model.parameters())
+    agent_RND_predictor_total_params = sum(p.numel() for p in agent.rnd.predictor.parameters())
+    agent_representation_model_total_params = sum(p.numel() for p in agent.representation_model.parameters()) if agent.representation_model is not None else 0
+    logger.log_msg_to_both_console_and_file(f"{'*'*20}\
+        \nNumber of PPO parameters: {agent_PPO_total_params}\
+        \nNumber of RND_predictor parameters: {agent_RND_predictor_total_params}\
+        \nNumber of {representation_lr_method if representation_lr_method != 'None' else 'Representation Learning Model'} parameters: {agent_representation_model_total_params}\
+        \n{'*'*20}")
+
+    agent.set_mode("eval")
+
     works = []
     parent_conns = []
     child_conns = []

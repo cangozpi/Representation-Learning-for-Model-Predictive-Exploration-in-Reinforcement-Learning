@@ -100,6 +100,23 @@ class RNDAgent(object):
         if self.representation_model is not None:
             self.representation_model = self.representation_model.to(self.device)
 
+    def set_mode(self, mode="train"):
+        """
+        Sets torch Modules (models) of the agent to the specified mode.
+        """
+        assert mode in ["train", "eval"]
+        if mode == "train":
+            self.model = self.model.train()
+            self.rnd = self.rnd.train()
+            if self.representation_model is not None:
+                self.representation_model = self.representation_model.train()
+        elif mode == "eval":
+            self.model = self.model.eval()
+            self.rnd = self.rnd.eval()
+            if self.representation_model is not None:
+                self.representation_model = self.representation_model.eval()
+        else:
+            raise NotImplementedError()
 
     def get_action(self, state):
         state = torch.Tensor(state).to(self.device)
@@ -280,4 +297,5 @@ class RNDAgent(object):
                 self.logger.log_scalar_to_tb_with_step('train/PPO_critic_loss vs parameter_update', np.mean(total_critic_loss), global_update + i)
                 self.logger.log_scalar_to_tb_with_step('train/PPO_entropy_loss vs parameter_update', np.mean(total_entropy_loss), global_update + i)
                 self.logger.log_scalar_to_tb_with_step('train/RND_loss vs parameter_update', np.mean(total_rnd_loss), global_update + i)
-                self.logger.log_scalar_to_tb_with_step(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)
+                if self.representation_model is not None:
+                    self.logger.log_scalar_to_tb_with_step(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)

@@ -249,3 +249,87 @@ class Logger:
     def log_scalar_to_tb_with_step(self, tag, scalar_value, step):
         self.tb_summaryWriter.add_scalar(tag, scalar_value, step) # log scalar to tb
 
+
+def print_config_options():
+    print(
+        """
+***********************************************
+***********************************************
+        [DEFAULT]
+        -TrainMethod: currently does not make a difference. Keep it as 'RND'
+        -representationLearningMethod: can be chosen from [None, BYOL, Barlow-Twins]. 'None' means just RND. 'BYOL' means use RND and BYOL combined. 'Barlow-Twins' means using RND and Barlow Twins methods combined.
+
+
+
+        -EnvType: can be chosen from [atari, mario, classic_control]. Specifies the category that openai gym environment belongs to. An Environment Process instance is created according to its value.
+        -EnvID: specifies the argument givent to gym.make(<EnvID>). Examples include [MontezumaRevengeNoFrameskip-v4, SuperMarioBros-v0, PongNoFrameskip-v4, CartPole-v1].
+
+
+        #------
+        -Epoch: number of epochs to perform optimization with a given rollout
+        -MiniBatch: number of minibatches to divide the training data into
+        -LearningRate: learning rate used by the optimizer
+
+
+        # PPO ->
+        -PPOEps: PPO clip is calculated as surr2 = clamp(ratio, 1 - PPOEps, 1 + PPOEps)
+        -Entropy: # entropy coefficient (loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss).
+
+        # ------ Exploration
+        # RND ->
+        -NumEnv: number of parallel environments (i.e. number of parallel processes that runs different environments simulataneously).
+        -NumStep: this many steps are taken in every 'NumEnv' many parallel environments before updating the model.
+        -MaxStepPerEpisode: maximum number of steps that can be taken per episode.
+        -LifeDone: (bool) is related to SuperMarioBros gym environment. When 'True', then an episode ends when Mario looses a life.
+        -StateStackSize: number of past frames (images) stacked to create state representation (i.e. history size).
+        -StickyAction: if 'True', then sticky actions (last action is repeated) are taken in gym environments with probability of ActionProb.
+        -ActionProb: probability used for sticky actions. See 'StrickAction' parameter explanation.
+        -IntGamma: gamma used for calculating the Return for intrinsic rewards (i.e. R_i = sum_over_t((intrinsic_gamma ** t) * intrinsic_reward_t)) (i.e. future reward discount factor).
+        -Gamma: gamma used for calculating the Return for extrinsic rewards (i.e. R_e = sum_over_t((intrinsic_gamma ** t) * extrinsic_reward_t) (i.e. future reward discount factor).
+        -ExtCoef: coefficient of extrinsic reward in the calculation of Combined Advantage (i.e. A = (A_i * IntCoef) + (A_e * ExtCoef).
+        -IntCoef: coefficient of intrinsic reward in the calculation of Combined Advantage (i.e. A = (A_i * IntCoef) + (A_e * ExtCoef).
+        -UpdateProportion: proportion of experience used for training the predictor network in RND (refer to RND paper for an explanation).
+        -UseGAE: if 'True', then GAE (Generalized Advantage Estimation) is used for advantage calculation.
+        -GAELambda: lambda in GAE. See 'UseGAE' parameter explanation
+        -PreProcHeight: height of the images (frames) used as the observations in the gym environments after preprocessing them.
+        -ProProcWidth: width of the images (frames) used as the observations in the gym environments after preprocessing them.
+        -ObsNormStep: (numStep * ObsNormStep) number of initial steps are taken for initializing observation normalization parameters.
+        -UseNoisyNet: if 'True', then noisy Linear layers are used instead of regular Linear (Dense) layers in the CNN network.
+
+        # CNN Actor-Critic dims (from RND): refer to https://github.com/openai/random-network-distillation/blob/master/policies/cnn_policy_param_matched.py
+
+
+        # ------ Representation Learning
+
+        -apply_same_transform_to_batch: if 'False', then a new transformation (used for augmenting stacked states) is sampled per each element in the batch, otherwise ('True') only one transformation is sampled per batch.
+
+        # BYOL->
+        -BYOL_projectionHiddenSize: original implementation on ImageNet used '4096'. Refers to the projection size of the hidden layer in BYOL network.
+        -BYOL_projectionSize: original implementation on ImageNet used '256'. Refers to the projection size (embedding size) of the projection layer in BYOL network.
+        -BYOL_movingAverageDecay: original implementation on ImageNet used a  dynamically changing value.
+        -BYOL_representationLossCoef: BYOL loss is multiplied with this coefficient (i.e. loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss).
+
+        # Barlow-Twins ->
+        -BarlowTwinsLambda: trade-off parameter lambda of the Barlow-Twins loss function (loss = on_diag + self.lambd * off_diag).
+        -BarlowTwinsProjectionSizes: original implementation on ImageNet used [8192, 8192, 8192]. Specifies the dimensions of the Linear layers of the projector network for Barlow-Twins.
+        -BarlowTwins_representationLossCoef: Barlow-Twins loss is multiplied with this coefficient (loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss).
+
+        -# ------
+
+
+
+        -loadModel: if 'True', a training checkpoint (model, optimizer, epoch, ...) is loaded from the path specified by the command line argument passed to '--load_model_path'.
+        -render: if 'True', then environments are rendered simultaneously on a new window. During training (i.e. '--train') do not set this to 'True' since multiple environments are playing out simultaneously. Set to 'True' during evaluation mode (i.e. '--eval').
+        -saveCkptEvery: after every this many episodes during training a checkpoint is saved.
+        -StableEps = 1e-8
+        -UseGPU: if 'True' then GPU (cuda) is used, else CPU.
+        -UseNorm: currently not being used (not supported).
+        -ClipGradNorm: currently not being used (not supported).
+
+
+        -[OPTIONS]
+        -EnvType = [atari, mario, classic_control]
+***********************************************
+***********************************************
+        """
+        )

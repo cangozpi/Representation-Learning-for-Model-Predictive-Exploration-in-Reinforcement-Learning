@@ -220,9 +220,14 @@ class AtariEnvironment(Environment):
 
             if done:
                 self.recent_rlist.append(self.rall)
-                self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
-                    self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist),
-                    info.get('episode', {}).get('visited_rooms', {})))
+
+                if 'Montezuma' in self.env_id:
+                    self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
+                        self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist),
+                        info.get('episode', {}).get('visited_rooms', {})))
+                else:
+                    self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
+                        self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist)))
 
                 self.history, info = self.reset()
 
@@ -516,9 +521,8 @@ class ClassicControlEnvironment(Environment):
 
             if done:
                 self.recent_rlist.append(self.rall)
-                self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
-                    self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist),
-                    info.get('episode', {}).get('visited_rooms', {})))
+                self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
+                    self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist)))
 
                 self.history, info = self.reset()
 

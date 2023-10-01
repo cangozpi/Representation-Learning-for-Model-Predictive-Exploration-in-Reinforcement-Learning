@@ -169,6 +169,7 @@ def main(args):
         \nNumber of {representation_lr_method if representation_lr_method != 'None' else 'Representation Learning Model'} parameters: {agent_representation_model_total_params}\
         \n{'*'*20}")
 
+    agent.set_mode("train")
 
     works = []
     parent_conns = []
@@ -336,8 +337,7 @@ def main(args):
                           total_policy, global_update)
         logger.log_msg_to_both_console_and_file("EXITTED TRAINING")
 
-        # if global_step % (num_worker * num_step * 100) == 0:
-        if True: # TODO: comment this line and uncomment the one above
+        if global_step % (num_worker * num_step * int(default_config["saveCkptEvery"])) == 0:
             ckpt_dict = {
                 **{
                     'agent.optimizer.state_dict': agent.optimizer.state_dict(),
