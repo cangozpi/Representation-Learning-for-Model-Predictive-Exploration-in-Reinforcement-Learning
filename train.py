@@ -22,16 +22,25 @@ def main(args):
     env_type = default_config['EnvType']
 
     if env_type == 'mario':
-        env = BinarySpaceToDiscreteSpaceEnv(gym_super_mario_bros.make(env_id), COMPLEX_MOVEMENT)
+        from nes_py.wrappers import JoypadSpace
+        # env = BinarySpaceToDiscreteSpaceEnv(gym_super_mario_bros.make(env_id), COMPLEX_MOVEMENT)
+        env = JoypadSpace(gym_super_mario_bros.make(env_id, apply_api_compatibility=True), COMPLEX_MOVEMENT)
     elif env_type == 'atari':
+        env = gym.make(env_id)
+    elif env_type == 'classic_control':
         env = gym.make(env_id)
     else:
         raise NotImplementedError
+
     if default_config['PreProcHeight'] is not None:
         input_size = int(default_config['PreProcHeight'])
     else:
         input_size = env.observation_space.shape  # 4
-    output_size = env.action_space.n  # 2
+
+    if isinstance(env.action_space, gym.spaces.box.Box):
+        output_size = env.action_space.shape[0]
+    else:
+        output_size = env.action_space.n  # 2
 
     if 'Breakout' in env_id:
         output_size -= 1
@@ -80,6 +89,8 @@ def main(args):
         env_type = AtariEnvironment
     elif default_config['EnvType'] == 'mario':
         env_type = MarioEnvironment
+    elif default_config['EnvType'] == 'classic_control':
+        env_type = ClassicControlEnvironment
     else:
         raise NotImplementedError
 

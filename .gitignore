@@ -7,6 +7,7 @@ checkpoints/*
 *.ckpt
 !models/.gitkeep
 runs/
+int_reward
 # Runtime data
 pids
 *.pid
