@@ -55,7 +55,6 @@ class Augment:
             self.train_transform = nn.Sequential(*transforms)
 
     def __call__(self, x):
-        breakpoint()
         return self.train_transform(x), self.train_transform(x)
 
 
