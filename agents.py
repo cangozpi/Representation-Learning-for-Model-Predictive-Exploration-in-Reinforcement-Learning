@@ -10,6 +10,7 @@ from torch.distributions.categorical import Categorical
 from model import CnnActorCriticNetwork, RNDModel
 from utils import global_grad_norm_
 from utils import Logger
+from config import default_config
 
 
 
@@ -24,7 +25,7 @@ class RNDAgent(object):
             GAE_Lambda=0.95,
             learning_rate=1e-4,
             ent_coef=0.01,
-            clip_grad_norm=0.5,
+            max_grad_norm=0.5,
             epoch=3,
             batch_size=128,
             ppo_eps=0.1,
@@ -46,7 +47,7 @@ class RNDAgent(object):
         self.use_gae = use_gae
         self.ent_coef = ent_coef
         self.ppo_eps = ppo_eps
-        self.clip_grad_norm = clip_grad_norm
+        self.max_grad_norm = max_grad_norm
         self.update_proportion = update_proportion
         self.device = torch.device('cuda' if use_cuda else 'cpu')
         assert isinstance(logger, Logger)
@@ -63,7 +64,6 @@ class RNDAgent(object):
         if self.representation_lr_method == "BYOL":
             backbone_model = self.model.feature
             from BYOL import BYOL, Augment
-            from config import default_config
             BYOL_projection_hidden_size = int(default_config['BYOL_projectionHiddenSize'])
             BYOL_projection_size = int(default_config['BYOL_projectionSize'])
             BYOL_moving_average_decay = float(default_config['BYOL_movingAverageDecay'])
@@ -78,7 +78,6 @@ class RNDAgent(object):
         if self.representation_lr_method == "Barlow-Twins":
             backbone_model = self.model.feature
             from BarlowTwins import BarlowTwins, Transform
-            from config import default_config
             import json
             projection_sizes = json.loads(default_config['BarlowTwinsProjectionSizes'])
             BarlowTwinsLambda = float(default_config['BarlowTwinsLambda'])
@@ -88,17 +87,35 @@ class RNDAgent(object):
             self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
 
-        if self.representation_model is not None:
-            self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.parameters()),
-                                    lr=learning_rate)
-        else:
-            self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) ,
-                                    lr=learning_rate)
+        self.optimizer = optim.Adam(self.get_agent_parameters(), lr=learning_rate)
 
         self.rnd = self.rnd.to(self.device)
         self.model = self.model.to(self.device)
         if self.representation_model is not None:
             self.representation_model = self.representation_model.to(self.device)
+    
+    def get_agent_parameters(self):
+        """
+        Gathers the parameters (nn.Module parameters) of the RNDAgent and returns the unique ones 
+        (without repetation of the shared parameters btw different models/modules).
+        In other words returns parameters from PPO Agent, RND, and Representation Model (i.e. BYOL, Barlow-Twins).
+        """
+        if self.representation_model is not None:
+            agent_params =  set(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.get_trainable_parameters()))
+        else:
+            agent_params = set(set(list(self.model.parameters()) + list(self.rnd.predictor.parameters())))
+        
+        # double checking
+        for p in self.model.parameters():
+            assert p in agent_params
+        for p in self.rnd.predictor.parameters():
+            assert p in agent_params
+        if self.representation_model is not None:
+            for p in self.representation_model.get_trainable_parameters():
+                assert p in agent_params
+
+        return agent_params
+
 
     def set_mode(self, mode="train"):
         """
@@ -150,7 +167,12 @@ class RNDAgent(object):
 
         for i in range(self.epoch):
             np.random.shuffle(sample_range)
+
             total_loss, total_actor_loss, total_critic_loss, total_entropy_loss, total_rnd_loss, total_representation_loss = [], [], [], [], [], []
+            total_grad_norm_unclipped = []
+            if default_config['UseGradClipping']:
+                total_grad_norm_clipped = []
+
             for j in range(int(len(states) / self.batch_size)):
                 sample_idx = sample_range[self.batch_size * j:self.batch_size * (j + 1)]
 
@@ -185,7 +207,6 @@ class RNDAgent(object):
                 if self.representation_lr_method == "BYOL":
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
-                    from config import default_config
                     if default_config.getboolean('apply_same_transform_to_batch'):
                         s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
                     else:
@@ -232,7 +253,6 @@ class RNDAgent(object):
                 if self.representation_lr_method == "Barlow-Twins":
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
-                    from config import default_config
                     if default_config.getboolean('apply_same_transform_to_batch'):
                         s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
                     else:
@@ -300,7 +320,10 @@ class RNDAgent(object):
                 self.optimizer.zero_grad()
                 loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss
                 loss.backward()
-                global_grad_norm_(list(self.model.parameters())+list(self.rnd.predictor.parameters()))
+                grad_norm_unclipped = global_grad_norm_(self.get_agent_parameters())
+                if default_config['UseGradClipping']:
+                    nn.utils.clip_grad_norm_(self.get_agent_parameters(), self.max_grad_norm) # gradient clipping
+                    grad_norm_clipped = global_grad_norm_(self.get_agent_parameters())
                 self.optimizer.step()
 
                 # logging
@@ -311,6 +334,9 @@ class RNDAgent(object):
                 total_rnd_loss.append(rnd_loss.detach().cpu().item())
                 if self.representation_model is not None:
                     total_representation_loss.append(self.representation_loss_coef * representation_loss.detach().cpu().item())
+                total_grad_norm_unclipped.append(grad_norm_unclipped)
+                if default_config['UseGradClipping']:
+                    total_grad_norm_clipped.append(grad_norm_clipped)
 
                 # EMA update BYOL target network params
                 if self.representation_lr_method == "BYOL":
@@ -325,3 +351,6 @@ class RNDAgent(object):
                 self.logger.log_scalar_to_tb_with_step('train/RND_loss vs parameter_update', np.mean(total_rnd_loss), global_update + i)
                 if self.representation_model is not None:
                     self.logger.log_scalar_to_tb_with_step(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)
+                self.logger.log_scalar_to_tb_with_step('train/grad_norm_unclipped vs parameter_update', np.mean(total_grad_norm_unclipped), global_update + i)
+                if default_config['UseGradClipping']:
+                    self.logger.log_scalar_to_tb_with_step('train/grad_norm_clipped vs parameter_update', np.mean(total_grad_norm_clipped), global_update + i)

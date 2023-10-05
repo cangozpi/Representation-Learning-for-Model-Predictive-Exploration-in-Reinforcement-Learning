@@ -149,6 +149,12 @@ class BYOL(nn.Module):
         self.target_model = self.target_model.to(self.device)
         self.online_predictor = self.online_predictor.to(self.device)
     
+    def get_trainable_parameters(self):
+        """
+        Returns the trainable parameters of the model (e.g. excludes EMA updated self.target_model, but includes trainable self.online_model)
+        """
+        return set(list(self.net.parameters()) + list(self.online_model.parameters()) + list(self.online_predictor.parameters()))
+    
     @torch.no_grad()
     def _get_target(self):
         return copy.deepcopy(self.online_model)

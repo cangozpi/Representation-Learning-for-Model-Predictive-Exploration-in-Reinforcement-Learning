@@ -323,8 +323,8 @@ def print_config_options():
         -saveCkptEvery: after every this many episodes during training a checkpoint is saved.
         -StableEps = 1e-8
         -UseGPU: if 'True' then GPU (cuda) is used, else CPU.
-        -UseNorm: currently not being used (not supported).
-        -ClipGradNorm: currently not being used (not supported).
+        -UseGradClipping: (bool) If True, then gradient clipping (max grad norm = 'MaxGradNorm') is used.
+        -MaxGradNorm: (float) If 'UseGradClipping' is True, then this value specifies the maximum norm of the gradient which will not be clipped.
 
 
         -[OPTIONS]

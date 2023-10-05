@@ -30,6 +30,12 @@ class BarlowTwins(nn.Module):
         self.device = torch.device('cuda' if use_cuda else 'cpu')
         self.backbone = self.backbone.to(self.device)
         self.projector = self.projector.to(self.device)
+    
+    def get_trainable_parameters(self):
+        """
+        Returns the trainable parameters of the model.
+        """
+        return self.parameters()
 
     def off_diagonal(self, x):
         # return a flattened view of the off-diagonal elements of a square matrix

@@ -69,7 +69,7 @@ def main(args):
     entropy_coef = float(default_config['Entropy'])
     gamma = float(default_config['Gamma'])
     int_gamma = float(default_config['IntGamma'])
-    clip_grad_norm = float(default_config['ClipGradNorm'])
+    max_grad_norm = float(default_config['MaxGradNorm'])
     ext_coef = float(default_config['ExtCoef'])
     int_coef = float(default_config['IntCoef'])
 
@@ -103,7 +103,7 @@ def main(args):
         GAE_Lambda=GAE_Lambda,
         learning_rate=learning_rate,
         ent_coef=entropy_coef,
-        clip_grad_norm=clip_grad_norm,
+        max_grad_norm=max_grad_norm,
         epoch=epoch,
         batch_size=batch_size,
         ppo_eps=ppo_eps,
