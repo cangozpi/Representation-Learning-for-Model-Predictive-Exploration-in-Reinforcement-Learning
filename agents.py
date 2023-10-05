@@ -185,7 +185,11 @@ class RNDAgent(object):
                 if self.representation_lr_method == "BYOL":
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
-                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    from config import default_config
+                    if default_config.getboolean('apply_same_transform_to_batch'):
+                        s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    else:
+                        s_batch_views = self.data_transform(s_batch) # -> [B*STATE_STACK_SIZE, C=STATE_STACK_SIZE, H, W], [B, C=STATE_STACK_SIZE, H, W]
                     s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
                         torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                 
@@ -197,7 +201,7 @@ class RNDAgent(object):
                         for i in range(4):
                             idx = np.random.choice(B)
                             print(idx)
-                            fig, axs = plt.subplots(4, 2)
+                            fig, axs = plt.subplots(4, 2, constrained_layout=True)
                             axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
@@ -206,6 +210,15 @@ class RNDAgent(object):
                             axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+
+                            axs[0,0].set_title(f'original state:{idx} frame:0', fontsize=10)
+                            axs[0,1].set_title(f'augmented state:{idx} frame:0', fontsize=10)
+                            axs[1,0].set_title(f'original state:{idx} frame:1', fontsize=10)
+                            axs[1,1].set_title(f'augmented state:{idx} frame:1', fontsize=10)
+                            axs[2,0].set_title(f'original state:{idx} frame:2', fontsize=10)
+                            axs[2,1].set_title(f'augmented state:{idx} frame:2', fontsize=10)
+                            axs[3,0].set_title(f'original state:{idx} frame:3', fontsize=10)
+                            axs[3,1].set_title(f'augmented state:{idx} frame:3', fontsize=10)
                             plt.show()
 
                     # compute BYOL loss
@@ -219,7 +232,11 @@ class RNDAgent(object):
                 if self.representation_lr_method == "Barlow-Twins":
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
-                    s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    from config import default_config
+                    if default_config.getboolean('apply_same_transform_to_batch'):
+                        s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
+                    else:
+                        s_batch_views = self.data_transform(s_batch) # -> [B, C=STATE_STACK_SIZE, H, W], [B, C=STATE_STACK_SIZE, H, W]
                     s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
                         torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                 
@@ -231,7 +248,7 @@ class RNDAgent(object):
                         for i in range(4):
                             idx = np.random.choice(B)
                             print(idx)
-                            fig, axs = plt.subplots(4, 2)
+                            fig, axs = plt.subplots(4, 2, constrained_layout=True)
                             axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
@@ -240,6 +257,15 @@ class RNDAgent(object):
                             axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
                             axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+
+                            axs[0,0].set_title(f'original state:{idx} frame:0', fontsize=10)
+                            axs[0,1].set_title(f'augmented state:{idx} frame:0', fontsize=10)
+                            axs[1,0].set_title(f'original state:{idx} frame:1', fontsize=10)
+                            axs[1,1].set_title(f'augmented state:{idx} frame:1', fontsize=10)
+                            axs[2,0].set_title(f'original state:{idx} frame:2', fontsize=10)
+                            axs[2,1].set_title(f'augmented state:{idx} frame:2', fontsize=10)
+                            axs[3,0].set_title(f'original state:{idx} frame:3', fontsize=10)
+                            axs[3,1].set_title(f'augmented state:{idx} frame:3', fontsize=10)
                             plt.show()
 
                     # compute Barlow-Twins loss
