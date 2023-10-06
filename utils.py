@@ -248,7 +248,61 @@ class Logger:
 
     def log_scalar_to_tb_with_step(self, tag, scalar_value, step):
         self.tb_summaryWriter.add_scalar(tag, scalar_value, step) # log scalar to tb
+    
+    def log_gradients_in_model_to_tb(self, model, step, model_name, log_full_detail=False):
+        """
+        Logs information (grads, means, ...) about the the parameters of the given model to tensorboard.
+        Inputs:
+            model (torch.nn.Module): model to log its paramters
+            step (int): x-axis value in the plots
+            model_name (str): information will be logged under the given model_name in tensorboard
+            log_full_detail (bool): if False, just logs norm of the overall grdients. If True, logs more detailed info per weights and biases.
+        """
+        all_weight_grads = torch.tensor([])
+        all_bias_grads = torch.tensor([])
+        # Log gradients to Tensorboard
+        for name, param in model.named_parameters():
+            if param.grad is None:
+                continue
+            if "weight" in name: # Model weight
+                if log_full_detail:
+                    self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, step)
+                    self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), step)
 
+                all_weight_grads = torch.concat([all_weight_grads, param.grad.cpu().reshape(-1)])
+
+            elif "bias" in name: # Model bias
+                if log_full_detail:
+                    self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, step)
+                    self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), step)
+
+                all_bias_grads = torch.concat([all_bias_grads, param.grad.cpu().reshape(-1)])
+        
+        # Log norm of all the model grads concatenated together to form one giant vector
+        all_weight_grads_norm = torch.norm(all_weight_grads, 2)
+        all_bias_grads_norm = torch.norm(all_bias_grads, 2)
+        self.tb_summaryWriter.add_scalar("all_weight_grads_norm/"+model_name, all_weight_grads_norm.item(), step)
+        self.tb_summaryWriter.add_scalar("all_bias_grads_norm/"+model_name, all_bias_grads_norm.item(), step)
+
+    def log_parameters_in_model_to_tb(self, model, step, model_name):
+        """
+        Logs information (weights, biases, means, ...) about the the parameters of the given model to tensorboard.
+        Inputs:
+            model (torch.nn.Module): model to log its paramters
+            step (int): x-axis value in the plots
+            model_name (str): information will be logged under the given model_name in tensorboard
+            log_full_detail (bool): if False, just logs norm of the overall grdients. If True, logs more detailed info per weights and biases.
+        """
+        # Log weights and biases to Tensorboard
+        for name, param in model.named_parameters():
+            if "weight" in name: # Model weight
+                self.tb_summaryWriter.add_histogram("weight/"+model_name+"/"+name, param, step)
+                self.tb_summaryWriter.add_scalar("weight.mean/"+model_name+"/"+name, param.mean(), step)
+
+            elif "bias" in name: # Model bias
+                self.tb_summaryWriter.add_histogram("bias/"+model_name+"/"+name, param, step)
+                self.tb_summaryWriter.add_scalar("bias.mean/"+model_name+"/"+name, param.mean(), step)
+        
 
 def print_config_options():
     print(

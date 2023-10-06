@@ -295,7 +295,7 @@ class RNDAgent(object):
 
 
                 # --------------------------------------------------------------------------------
-                # for Proximal Policy Optimization(PPO):
+                # for Proximal Policy Optimization (PPO):
                 policy, value_ext, value_int = self.model(s_batch)
                 m = Categorical(F.softmax(policy, dim=-1))
                 log_prob = m.log_prob(y_batch)
@@ -320,10 +320,18 @@ class RNDAgent(object):
                 self.optimizer.zero_grad()
                 loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss
                 loss.backward()
+
                 grad_norm_unclipped = global_grad_norm_(self.get_agent_parameters())
                 if default_config['UseGradClipping']:
                     nn.utils.clip_grad_norm_(self.get_agent_parameters(), self.max_grad_norm) # gradient clipping
                     grad_norm_clipped = global_grad_norm_(self.get_agent_parameters())
+                # Log final model grads in detail
+                if i == self.epoch - 1:
+                    self.logger.log_gradients_in_model_to_tb(self.model, global_update + i, f'PPO', log_full_detail=True)
+                    self.logger.log_gradients_in_model_to_tb(self.rnd, global_update + i, f'RND', log_full_detail=True)
+                    if self.representation_model is not None:
+                        self.logger.log_gradients_in_model_to_tb(self.representation_model, global_update + i, f'{self.representation_lr_method}', log_full_detail=True)
+
                 self.optimizer.step()
 
                 # logging
@@ -351,6 +359,11 @@ class RNDAgent(object):
                 self.logger.log_scalar_to_tb_with_step('train/RND_loss vs parameter_update', np.mean(total_rnd_loss), global_update + i)
                 if self.representation_model is not None:
                     self.logger.log_scalar_to_tb_with_step(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)
-                self.logger.log_scalar_to_tb_with_step('train/grad_norm_unclipped vs parameter_update', np.mean(total_grad_norm_unclipped), global_update + i)
+                self.logger.log_scalar_to_tb_with_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), global_update + i)
                 if default_config['UseGradClipping']:
-                    self.logger.log_scalar_to_tb_with_step('train/grad_norm_clipped vs parameter_update', np.mean(total_grad_norm_clipped), global_update + i)
+                    self.logger.log_scalar_to_tb_with_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), global_update + i)
+                # Log final model parameters in detail
+                self.logger.log_parameters_in_model_to_tb(self.model, global_update + i, f'PPO')
+                self.logger.log_parameters_in_model_to_tb(self.rnd, global_update + i, f'RND')
+                if self.representation_model is not None:
+                    self.logger.log_parameters_in_model_to_tb(self.representation_model, global_update + i, f'{self.representation_lr_method}')
