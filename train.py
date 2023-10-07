@@ -7,6 +7,7 @@ from torch.multiprocessing import Pipe
 import numpy as np
 from utils import Logger, set_seed
 from os import path
+from collections import deque
 
 
 def main(args):
@@ -114,13 +115,12 @@ def main(args):
         logger=logger
     )
 
-    sample_episode = 0
-    sample_rall = 0
-    sample_step = 0
-    sample_env_idx = 0
-    sample_i_rall = 0
     global_update = 0
     global_step = 0
+    undiscounted_episode_return = deque([], maxlen=100)
+    episode_lengths = deque([], maxlen=100)
+    if 'Montezuma' in env_id:
+        visited_rooms = deque([], maxlen=100)
 
     if is_load_model:
         logger.log_msg_to_both_console_and_file(f'loading from checkpoint: {load_ckpt_path}')
@@ -152,9 +152,12 @@ def main(args):
 
         obs_rms = load_checkpoint['obs_rms']
         reward_rms = load_checkpoint['reward_rms']
-        sample_episode = load_checkpoint['sample_episode']
         global_update = load_checkpoint['global_update']
         global_step = load_checkpoint['global_step']
+        undiscounted_episode_return = load_checkpoint['undiscounted_episode_return']
+        episode_lengths = load_checkpoint['episode_lengths']
+        if 'Montezuma' in env_id:
+            visited_rooms = load_checkpoint['visited_rooms']
         logger.tb_global_steps = load_checkpoint['logger.tb_global_steps']
 
         logger.log_msg_to_both_console_and_file('loading finished!')
@@ -197,7 +200,7 @@ def main(args):
                 parent_conn.send(action)
 
             for parent_conn in parent_conns:
-                s, r, d, rd, lr = parent_conn.recv()
+                s, r, d, _, info = parent_conn.recv()
                 next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
 
             if len(next_obs) % (num_step * num_worker) == 0:
@@ -207,8 +210,8 @@ def main(args):
         logger.log_msg_to_both_console_and_file('End to initialize...')
 
     while True:
-        total_state, total_reward, total_done, total_next_state, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy, total_policy_np = \
-            [], [], [], [], [], [], [], [], [], [], []
+        total_state, total_reward, total_done, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy = \
+            [], [], [], [], [], [], [], [], []
         global_step += (num_worker * num_step)
         global_update += 1
 
@@ -219,27 +222,29 @@ def main(args):
             for parent_conn, action in zip(parent_conns, actions):
                 parent_conn.send(action)
 
-            next_states, rewards, dones, real_dones, log_rewards, next_obs = [], [], [], [], [], []
+            next_states, rewards, dones, next_obs = [], [], [], []
             for parent_conn in parent_conns:
-                s, r, d, rd, lr = parent_conn.recv()
+                s, r, d, _, info, = parent_conn.recv()
                 next_states.append(s)
                 rewards.append(r)
-                dones.append(d)
-                real_dones.append(rd) # --> [num_env]
-                log_rewards.append(lr) # --> [num_env]
+                dones.append(d) # --> [num_env]
                 next_obs.append(s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]))
+                if 'episode' in info:
+                    if 'Montezuma' in env_id:
+                        visited_rooms.append(info['episode']['visited_rooms'])
+                    undiscounted_episode_return.append(info['episode']['undiscounted_episode_return'])
+                    episode_lengths.append(info['episode']['l'])
+                    
 
             next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
             rewards = np.hstack(rewards) # -> [num_env, ]
             dones = np.hstack(dones) # -> [num_env, ]
-            real_dones = np.hstack(real_dones) # -> [num_env, ]
             next_obs = np.stack(next_obs) # -> [num_env, 1, H, W]
 
             # total reward = int reward + ext Reward
             intrinsic_reward = agent.compute_intrinsic_reward(
                 ((next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
             intrinsic_reward = np.hstack(intrinsic_reward)
-            sample_i_rall += intrinsic_reward[sample_env_idx]
 
             total_next_obs.append(next_obs) # --> [num_step, num_env, state_stack_size, H, W]
             total_int_reward.append(intrinsic_reward)
@@ -250,21 +255,9 @@ def main(args):
             total_ext_values.append(value_ext)
             total_int_values.append(value_int)
             total_policy.append(policy)
-            total_policy_np.append(policy.cpu().numpy())
 
             states = next_states[:, :, :, :]
 
-            sample_rall += log_rewards[sample_env_idx]
-
-            sample_step += 1
-            if real_dones[sample_env_idx]:
-                sample_episode += 1
-                logger.log_scalar_to_tb_with_step('data/reward_per_epi', sample_rall, sample_episode)
-                logger.log_scalar_to_tb_with_step('data/reward_per_rollout', sample_rall, global_update)
-                logger.log_scalar_to_tb_with_step('data/step', sample_step, sample_episode)
-                sample_rall = 0
-                sample_step = 0
-                sample_i_rall = 0
 
         # calculate last next value
         _, value_ext, value_int, _ = agent.get_action(np.float32(states) / 255.)
@@ -279,11 +272,7 @@ def main(args):
         total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, 1, input_size, input_size]) # --> [num_env * num_step, 1, H, W]
         total_ext_values = np.stack(total_ext_values).transpose() # --> [num_env, (num_step + 1)]
         total_int_values = np.stack(total_int_values).transpose() # --> [num_env, (num_step + 1)]
-        total_logging_policy = np.vstack(total_policy_np) # --> [num_env * num_step, output_size]
 
-
-        # writer.add_scalar('data/mean_episodic_return (extrinsic) vs episode', np.sum(total_reward) / num_worker, sample_episode)
-        logger.log_scalar_to_tb_with_step('data/mean_episodic_return (extrinsic) vs parameter_update', np.sum(total_reward) / num_worker, global_update)
 
         # Step 2. calculate intrinsic reward
         # running mean intrinsic reward
@@ -295,14 +284,7 @@ def main(args):
 
         # normalize intrinsic reward
         total_int_reward /= np.sqrt(reward_rms.var)
-        # writer.add_scalar('data/mean_episodic_return (intrinsic) vs episode', np.sum(total_int_reward) / num_worker, sample_episode)
-        logger.log_scalar_to_tb_with_step('data/mean_episodic_return (intrinsic) vs parameter_update', np.sum(total_int_reward) / num_worker, global_update)
-        # writer.add_scalar('data/int_reward_per_epi', np.sum(total_int_reward) / num_worker, sample_episode)
-        # writer.add_scalar('data/int_reward_per_rollout', np.sum(total_int_reward) / num_worker, global_update)
         # -------------------------------------------------------------------------------------------
-
-        # logging Max action probability
-        logger.log_scalar_to_tb_with_step('data/max_policy_action_prob vs episode', softmax(total_logging_policy).max(1).mean(), sample_episode)
 
         # Step 3. make target and advantage
         # extrinsic reward calculate
@@ -337,6 +319,18 @@ def main(args):
                           total_policy, global_update)
         logger.log_msg_to_both_console_and_file("EXITTED TRAINING")
 
+
+        # Logging
+        logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (extrinsic) vs Parameter updates', np.mean(total_reward), global_update)
+        logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update)
+        if len(episode_lengths) > 0: # check if any episode has been completed yet
+            logger.log_scalar_to_tb_with_step('data/Mean undiscounted episodic return (over last 100 episodes) (extrinsic) vs Parameter updates', np.mean(undiscounted_episode_return), global_update)
+            logger.log_scalar_to_tb_with_step('data/Mean episode lengths (over last 100 episodes) vs Parameter updates', np.mean(episode_lengths), global_update)
+            if 'Montezuma' in env_id:
+                logger.log_scalar_to_tb_with_step('data/Mean number of rooms found (over last 100 episodes) vs Parameter updates', np.mean(list(map(lambda x: len(x),visited_rooms))), global_update)
+
+
+        # Save checkpoint
         if global_step % (num_worker * num_step * int(default_config["saveCkptEvery"])) == 0:
             ckpt_dict = {
                 **{
@@ -348,14 +342,19 @@ def main(args):
                 **({'agent.representation_model.state_dict': agent.representation_model.state_dict()} if representation_lr_method == "BYOL" else {}),
                 **({'agent.representation_model.state_dict': agent.representation_model.state_dict()} if representation_lr_method == "Barlow-Twins" else {}),
                 **{
-                    'sample_episode': sample_episode,
-                    'global_update': global_update,
-                    'global_step': global_step,
                     'obs_rms': obs_rms,
                     'reward_rms': reward_rms,
                 },
+                **({
+                    'global_update': global_update,
+                    'global_step': global_step,
+                    'undiscounted_episode_return': undiscounted_episode_return,
+                    'episode_lengths': episode_lengths,
+                }),
                 **({'logger.tb_global_steps': logger.tb_global_steps})
             }
+            if 'Montezuma' in env_id:
+                ckpt_dict.update(visited_rooms=visited_rooms)
             os.makedirs('/'.join(save_ckpt_path.split('/')[:-1]), exist_ok=True)
             torch.save(ckpt_dict, save_ckpt_path)
             logger.log_msg_to_both_console_and_file('Saved ckpt at Global Step :{}'.format(global_step))

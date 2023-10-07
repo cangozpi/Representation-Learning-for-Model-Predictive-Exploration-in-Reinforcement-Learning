@@ -20,6 +20,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 from utils import Logger
+import time
 
 train_method = default_config['TrainMethod']
 max_step_per_episode = int(default_config['MaxStepPerEpisode'])
@@ -85,8 +86,6 @@ class MaxAndSkipEnv(gym.Wrapper):
                 plt.axis
                 plt.pause(1/60)
 
-                # self.env.render()
-
 
             if i == self._skip - 2:
                 self._obs_buffer[0] = obs
@@ -113,9 +112,27 @@ class MaxAndSkipEnv(gym.Wrapper):
             plt.axis
             plt.pause(1/60)
 
-            # self.env.render()
-
         return obs, info
+
+
+class MaxStepPerEpisodeWrapper(gym.Wrapper):
+    def __init__(self, env, max_step_per_episode):
+        super(MaxStepPerEpisodeWrapper, self).__init__(env)
+        self.max_step_per_episode = max_step_per_episode
+        self.steps = 0
+
+    def step(self, action):
+        obs, rew, done, _, info = self.env.step(action)
+        if self.max_step_per_episode < self.steps:
+            done = True
+            _ = True
+
+        self.steps += 1
+        return obs, rew, done, _, info
+
+    def reset(self, **kwargs):
+        self.steps = 0
+        return self.env.reset(**kwargs)
 
 
 class MontezumaInfoWrapper(gym.Wrapper):
@@ -133,11 +150,10 @@ class MontezumaInfoWrapper(gym.Wrapper):
         obs, rew, done, _, info = self.env.step(action)
         self.visited_rooms.add(self.get_current_room())
 
-        if 'episode' not in info:
-            info['episode'] = {}
-        info['episode'].update(visited_rooms=copy(self.visited_rooms))
-
         if done:
+            if 'episode' not in info:
+                info['episode'] = {}
+            info['episode'].update(visited_rooms=copy(self.visited_rooms))
             self.visited_rooms.clear()
         return obs, rew, done, _, info
 
@@ -163,14 +179,16 @@ class AtariEnvironment(Environment):
             logger:Logger=None):
         super(AtariEnvironment, self).__init__()
         self.daemon = True
-        self.env = MaxAndSkipEnv(gym.make(env_id, render_mode="rgb_array" if is_render else None), is_render)
+        self.env = gym.make(env_id, render_mode="rgb_array" if is_render else None)
+        self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
+        self.env = MaxAndSkipEnv(self.env, is_render)
         if 'Montezuma' in env_id:
             self.env = MontezumaInfoWrapper(self.env, room_address=3 if 'Montezuma' in env_id else 1)
+        self.env = Monitor(self.env)
         self.logger = logger
         self.env_id = env_id
         self.is_render = is_render
         self.env_idx = env_idx
-        self.steps = 0
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
@@ -206,51 +224,38 @@ class AtariEnvironment(Environment):
 
             s, reward, done, _, info = self.env.step(action)
 
-            if max_step_per_episode < self.steps:
-                done = True
-
-            log_reward = reward
-            force_done = done
-
             self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
             self.history[(self.history_size - 1), :, :] = self.pre_proc(s)
 
             self.rall += reward
-            self.steps += 1
 
             if done:
                 self.recent_rlist.append(self.rall)
 
                 if 'Montezuma' in self.env_id:
                     self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
-                        self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist),
+                        self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist),
                         info.get('episode', {}).get('visited_rooms', {})))
                 else:
                     self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
-                        self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist)))
+                        self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist)))
 
-                self.history, info = self.reset()
+                self.history, _info = self.reset()
 
             self.child_conn.send(
-                [self.history[:, :, :], reward, force_done, done, log_reward])
+                [self.history[:, :, :], reward, done, _, info])
 
     def reset(self, **kwargs):
         self.last_action = 0
-        self.steps = 0
         self.episode += 1
         self.rall = 0
         s, info = self.env.reset(**kwargs)
-        # self.get_init_state(
-        #     self.pre_proc(s))
         self.get_init_state(s)
         return self.history[:, :, :], info
 
     def pre_proc(self, X):
         assert X.shape[-1] == 3 # [H, W, 3]
         x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
-        # import matplotlib.pyplot as plt
-        # plt.imshow(x, cmap='gray')
-        # plt.show()
         return x
 
     def get_init_state(self, s):
@@ -275,16 +280,14 @@ class MarioEnvironment(Process):
         super(MarioEnvironment, self).__init__()
         self.daemon = True
         self.logger = logger
-        # self.env = BinarySpaceToDiscreteSpaceEnv(
-        #     gym_super_mario_bros.make(env_id), COMPLEX_MOVEMENT)
-        # self.env = JoypadSpace(
-        #     gym.make(env_id, render_mode="rgb_array" if is_render else None), COMPLEX_MOVEMENT)
-        self.env = JoypadSpace(
-            gym_super_mario_bros.make(env_id, apply_api_compatibility=True, render_mode = "rgb_array"), COMPLEX_MOVEMENT)
+        self.env = gym_super_mario_bros.make(env_id, apply_api_compatibility=True, render_mode = "rgb_array")
+        self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
+        self.env = JoypadSpace(self.env, COMPLEX_MOVEMENT)
+        self.env = MaxAndSkipEnv(self.env, is_render)
+        self.env = Monitor(self.env)
 
         self.is_render = is_render
         self.env_idx = env_idx
-        self.steps = 0
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
@@ -300,13 +303,6 @@ class MarioEnvironment(Process):
         self.h = h
         self.w = w
 
-        # custom rendering
-        if self.is_render:
-            plt.ion()
-            self.env.reset()
-            rendering_view = self.env.render()
-            self.ax = plt.imshow(rendering_view)
-
         self.seed = seed
         # self.reset(seed=self.seed)
         self.reset()
@@ -316,15 +312,6 @@ class MarioEnvironment(Process):
         super(MarioEnvironment, self).run()
         while True:
             action = self.child_conn.recv()
-            if self.is_render:
-                # custom rendering
-                rendering_view = self.env.render()
-                self.ax.set_data(rendering_view)
-                plt.xticks([])
-                plt.yticks([])
-                plt.axis
-                plt.pause(1/60)
-                # self.env.render()
 
             # sticky action
             if self.sticky_action:
@@ -332,39 +319,29 @@ class MarioEnvironment(Process):
                     action = self.last_action
                 self.last_action = action
 
-            # 4 frame skip
-            reward = 0.0
-            done = None
-            for i in range(self.history_size):
-                obs, r, done, _, info = self.env.step(action)
-                if self.is_render:
-                    self.env.render()
-                reward += r
-                if done:
-                    break
+            obs, r, done, _, info = self.env.step(action)
+
 
             # when Mario loses life, changes the state to the terminal
             # state.
+            force_done = _
             if self.life_done:
                 if self.lives > info['life'] and info['life'] > 0:
                     force_done = True
+                    done = True
                     self.lives = info['life']
                 else:
-                    force_done = done
                     self.lives = info['life']
-            else:
-                force_done = done
 
             # reward range -15 ~ 15
-            log_reward = reward / 15
-            self.rall += log_reward
+            r /= 15
+            self.rall += r
 
-            r = int(info.get('flag_get', False))
+            # r_ = int(info.get('flag_get', False)) #TODO: not sure how to use this
 
             self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
             self.history[(self.history_size - 1), :, :] = self.pre_proc(obs)
 
-            self.steps += 1
 
             if done:
                 self.recent_rlist.append(self.rall)
@@ -372,7 +349,7 @@ class MarioEnvironment(Process):
                     "[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Stage: {} current x:{}   max x:{}".format(
                         self.episode,
                         self.env_idx,
-                        self.steps,
+                        self.env.steps,
                         self.rall,
                         np.mean(
                             self.recent_rlist),
@@ -380,13 +357,12 @@ class MarioEnvironment(Process):
                         info['x_pos'],
                         self.max_pos))
 
-                self.history, info = self.reset()
+                self.history, _info = self.reset()
 
-            self.child_conn.send([self.history[:, :, :], r, force_done, done, log_reward])
+            self.child_conn.send([self.history[:, :, :], r, done, force_done, info])
 
     def reset(self, **kwargs):
         self.last_action = 0
-        self.steps = 0
         self.episode += 1
         self.rall = 0
         self.lives = 3
@@ -408,16 +384,8 @@ class MarioEnvironment(Process):
         return self.history[:, :, :], info
 
     def pre_proc(self, X):
-        # # grayscaling
-        # x = cv2.cvtColor(X, cv2.COLOR_RGB2GRAY)
-        # # resize
-        # x = cv2.resize(x, (self.h, self.w))
-
         assert X.shape[-1] == 3 # [H, W, 3]
         x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
-        # import matplotlib.pyplot as plt
-        # plt.imshow(x, cmap='gray')
-        # plt.show()
         return x
 
     def get_init_state(self, s):
@@ -467,13 +435,16 @@ class ClassicControlEnvironment(Environment):
             logger:Logger=None):
         super(ClassicControlEnvironment, self).__init__()
         self.daemon = True
-        self.env = RGBArrayAsObservationWrapper(gym.make(env_id, render_mode="rgb_array"))
+        self.env = gym.make(env_id, render_mode="rgb_array")
+        self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
+        self.env = RGBArrayAsObservationWrapper(self.env)
         self.env = MaxAndSkipEnv(self.env, is_render)
+        self.env = Monitor(self.env)
+
         self.logger = logger
         self.env_id = env_id
         self.is_render = is_render
         self.env_idx = env_idx
-        self.steps = 0
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
@@ -507,50 +478,81 @@ class ClassicControlEnvironment(Environment):
 
             s, reward, done, _, info = self.env.step(action)
 
-            if max_step_per_episode < self.steps:
-                done = True
-
-            log_reward = reward
-            force_done = done
-
             self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
             self.history[(self.history_size - 1), :, :] = self.pre_proc(s)
 
             self.rall += reward
-            self.steps += 1
 
             if done:
                 self.recent_rlist.append(self.rall)
                 self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
-                    self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist)))
+                    self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist)))
 
-                self.history, info = self.reset()
+                self.history, _info = self.reset()
 
             self.child_conn.send(
-                [self.history[:, :, :], reward, force_done, done, log_reward])
+                [self.history[:, :, :], reward, done, _, info])
 
 
     def reset(self, **kwargs):
         self.last_action = 0
-        self.steps = 0
         self.episode += 1
         self.rall = 0
         # s = self.env.reset(seed=seed)
         s, info = self.env.reset(**kwargs)
-        # self.get_init_state(
-        #     self.pre_proc(s))
         self.get_init_state(s)
         return self.history[:, :, :], info
 
     def pre_proc(self, X):
         assert X.shape[-1] == 3 # [H, W, 3]
         x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
-        # import matplotlib.pyplot as plt
-        # plt.imshow(x, cmap='gray')
-        # plt.show()
         return x
 
 
     def get_init_state(self, s):
         for i in range(self.history_size):
             self.history[i, :, :] = self.pre_proc(s)
+
+
+class Monitor(gym.Wrapper):
+    def __init__(self, env):
+        gym.Wrapper.__init__(self, env=env)
+        self.tstart = time.time()
+
+        self.rewards = []
+        self.episode_rewards = []
+        self.episode_lengths = []
+        self.episode_times = []
+        self.total_steps = 0
+
+    def reset(self, **kwargs):
+        self.rewards = []
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        ob, rew, done, _, info = self.env.step(action)
+        self.rewards.append(rew)
+        if done:
+            eprew = sum(self.rewards)
+            eplen = len(self.rewards)
+            epinfo = {"undiscounted_episode_return": round(eprew, 6), "l": eplen, "t": round(time.time() - self.tstart, 6)}
+            self.episode_rewards.append(eprew)
+            self.episode_lengths.append(eplen)
+            self.episode_times.append(time.time() - self.tstart)
+            if "episode" not in info:
+                info["episoide"] = {}
+            info['episode'].update(epinfo)
+        self.total_steps += 1
+        return (ob, rew, done, _, info)
+
+    def get_total_steps(self):
+        return self.total_steps
+
+    def get_episode_rewards(self):
+        return self.episode_rewards
+
+    def get_episode_lengths(self):
+        return self.episode_lengths
+
+    def get_episode_times(self):
+        return self.episode_times

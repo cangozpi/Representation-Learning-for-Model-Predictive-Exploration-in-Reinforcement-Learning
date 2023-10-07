@@ -174,17 +174,17 @@ class RNDAgent(object):
                 total_grad_norm_clipped = []
 
             for j in range(int(len(states) / self.batch_size)):
-                sample_idx = sample_range[self.batch_size * j:self.batch_size * (j + 1)]
+                batch_indices = sample_range[self.batch_size * j:self.batch_size * (j + 1)]
 
                 # Perform batching and sending to GPU:
-                s_batch = torch.FloatTensor(states)[sample_idx].to(self.device)
-                target_ext_batch = torch.FloatTensor(target_ext)[sample_idx].to(self.device)
-                target_int_batch = torch.FloatTensor(target_int)[sample_idx].to(self.device)
-                y_batch = torch.LongTensor(y)[sample_idx].to(self.device)
-                adv_batch = torch.FloatTensor(adv)[sample_idx].to(self.device)
-                next_obs_batch = torch.FloatTensor(next_obs)[sample_idx].to(self.device)
+                s_batch = torch.FloatTensor(states)[batch_indices].to(self.device)
+                target_ext_batch = torch.FloatTensor(target_ext)[batch_indices].to(self.device)
+                target_int_batch = torch.FloatTensor(target_int)[batch_indices].to(self.device)
+                y_batch = torch.LongTensor(y)[batch_indices].to(self.device)
+                adv_batch = torch.FloatTensor(adv)[batch_indices].to(self.device)
+                next_obs_batch = torch.FloatTensor(next_obs)[batch_indices].to(self.device)
                 with torch.no_grad():
-                    policy_old_list = torch.stack(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[sample_idx].to(self.device)
+                    policy_old_list = torch.stack(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[batch_indices].to(self.device)
                     m_old = Categorical(F.softmax(policy_old_list, dim=-1))
                     log_prob_old = m_old.log_prob(y_batch)
 
@@ -327,10 +327,10 @@ class RNDAgent(object):
                     grad_norm_clipped = global_grad_norm_(self.get_agent_parameters())
                 # Log final model grads in detail
                 if i == self.epoch - 1:
-                    self.logger.log_gradients_in_model_to_tb(self.model, global_update + i, f'PPO', log_full_detail=True)
-                    self.logger.log_gradients_in_model_to_tb(self.rnd, global_update + i, f'RND', log_full_detail=True)
+                    self.logger.log_gradients_in_model_to_tb_without_step(self.model,'PPO', log_full_detail=True)
+                    self.logger.log_gradients_in_model_to_tb_without_step(self.rnd, 'RND', log_full_detail=True)
                     if self.representation_model is not None:
-                        self.logger.log_gradients_in_model_to_tb(self.representation_model, global_update + i, f'{self.representation_lr_method}', log_full_detail=True)
+                        self.logger.log_gradients_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', log_full_detail=True)
 
                 self.optimizer.step()
 
@@ -352,18 +352,18 @@ class RNDAgent(object):
             
             # logging
             if self.logger is not None:
-                self.logger.log_scalar_to_tb_with_step('train/overall_loss (everything combined) vs parameter_update', np.mean(total_loss), global_update + i)
-                self.logger.log_scalar_to_tb_with_step('train/PPO_actor_loss vs parameter_update', np.mean(total_actor_loss), global_update + i)
-                self.logger.log_scalar_to_tb_with_step('train/PPO_critic_loss vs parameter_update', np.mean(total_critic_loss), global_update + i)
-                self.logger.log_scalar_to_tb_with_step('train/PPO_entropy_loss vs parameter_update', np.mean(total_entropy_loss), global_update + i)
-                self.logger.log_scalar_to_tb_with_step('train/RND_loss vs parameter_update', np.mean(total_rnd_loss), global_update + i)
+                self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss))
+                self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss))
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss vs epoch', np.mean(total_critic_loss))
+                self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss))
+                self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss))
                 if self.representation_model is not None:
-                    self.logger.log_scalar_to_tb_with_step(f'train/Representation_loss({self.representation_lr_method}) vs parameter_update', np.mean(total_representation_loss), global_update + i)
-                self.logger.log_scalar_to_tb_with_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), global_update + i)
+                    self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss))
+                self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped))
                 if default_config['UseGradClipping']:
-                    self.logger.log_scalar_to_tb_with_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), global_update + i)
+                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped))
                 # Log final model parameters in detail
-                self.logger.log_parameters_in_model_to_tb(self.model, global_update + i, f'PPO')
-                self.logger.log_parameters_in_model_to_tb(self.rnd, global_update + i, f'RND')
+                self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO')
+                self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND')
                 if self.representation_model is not None:
-                    self.logger.log_parameters_in_model_to_tb(self.representation_model, global_update + i, f'{self.representation_lr_method}')
+                    self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}')
