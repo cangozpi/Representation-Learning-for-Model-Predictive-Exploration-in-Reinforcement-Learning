@@ -1,48 +1,10 @@
 import gym
-from envs import AtariEnvironment
+from envs import AtariEnvironment, MarioEnvironment, ClassicControlEnvironment
 from multiprocessing import Pipe
-from envs import MaxStepPerEpisodeWrapper, MaxAndSkipEnv, MontezumaInfoWrapper, FrameStackWrapper, StickyActionWrapper, Monitor
+from envs import MaxStepPerEpisodeWrapper, MaxAndSkipEnv, MontezumaInfoWrapper, FrameStackWrapper, StickyActionWrapper, Monitor, ResizeAndGrayScaleWrapper, RGBArrayAsObservationWrapper
 import numpy as np
 import matplotlib.pyplot as plt
 from gym.utils import play
-
-def test_Atari():
-    default_config = {'EnvType': 'atari'}
-    env_id = "MontezumaRevengeNoFrameskip-v4"
-
-    if default_config['EnvType'] == 'atari':
-        env_type = AtariEnvironment
-    elif default_config['EnvType'] == 'mario':
-        env_type = MarioEnvironment
-    elif default_config['EnvType'] == 'classic_control':
-        env_type = ClassicControlEnvironment
-    else:
-        raise NotImplementedError
-
-    is_render = False
-    sticky_action = False
-    action_prob = 0.5
-    life_done = True
-    stateStackSize = 4
-    seed = 42
-    from utils import Logger
-    from os import path
-    logger = Logger(file_log_path=path.join("logs", "file_logs", "test_log"), tb_log_path=path.join("logs", "tb_logs", "test_log"))
-    num_worker = 1
-
-    works = []
-    parent_conns = []
-    child_conns = []
-    for idx in range(num_worker):
-        parent_conn, child_conn = Pipe()
-        work = env_type(env_id, is_render, idx, child_conn, sticky_action=sticky_action, p=action_prob,
-                        life_done=life_done, history_size=stateStackSize, seed=seed, logger=logger)
-        work.start()
-        works.append(work)
-        parent_conns.append(parent_conn)
-        child_conns.append(child_conn)
-    
-    # Env is ready here
 
 
 def get_env(env_id = "MontezumaRevengeNoFrameskip-v4", **kwargs):
@@ -222,6 +184,7 @@ def test_StickyActionWrapper():
         # print(f'sent action: {action}, env took stickyAction: {env.last_action}')
         assert env.last_action == action
 
+
 def test_MonitorWrapper():
     env = get_env()
     env = Monitor(env)
@@ -239,13 +202,118 @@ def test_MonitorWrapper():
     assert episode_length == info['episode']['l']
 
 
+def test_ResizeAndGrayScaleWrapper():
+    h, w = 84, 84
+    env = get_env()
+    env = ResizeAndGrayScaleWrapper(env, h, w)
+    state, info = env.reset()
+    assert state.shape == (h, w)
+    done = False
+    while done == False:
+        action = env.action_space.sample()
+        next_state, reward, done, truncated, info = env.step(action)
+        assert next_state.shape == (h, w)
+        state = next_state
+
+
+def test_RGBArrayAsObservationWrapper():
+    env = gym.make('CartPole-v1', render_mode='rgb_array')
+    env = RGBArrayAsObservationWrapper(env)
+
+    state, info = env.reset()
+    assert len(state.shape) == 3
+    assert state.shape[-1] == 3
+    action = env.action_space.sample()
+    next_state, reward, done, _, info = env.step(action)
+    assert len(next_state.shape) == 3
+    assert next_state.shape[-1] == 3
+
+
+def test_CustomEnvironments(env_type='atari', env_id='MontezumaRevengeNoFrameskip-v4'):
+    default_config = {'EnvType': env_type}
+    env_id = env_id
+
+    if default_config['EnvType'] == 'atari':
+        env_type = AtariEnvironment
+    elif default_config['EnvType'] == 'mario':
+        env_type = MarioEnvironment
+    elif default_config['EnvType'] == 'classic_control':
+        env_type = ClassicControlEnvironment
+    else:
+        raise NotImplementedError
+
+    every_env_takes_same_action = True # if True then every env takes the same action, if False then actions are sampled independently for each parallelized env
+    is_render = False
+    sticky_action = False
+    action_prob = 0.5
+    life_done = True
+    stateStackSize = 4
+    seed = 42
+    from utils import Logger
+    from os import path
+    logger = Logger(file_log_path=path.join("logs", "file_logs", "test_log"), tb_log_path=path.join("logs", "tb_logs", "test_log"))
+    num_worker = 2
+
+    works = []
+    parent_conns = []
+    child_conns = []
+    for idx in range(num_worker):
+        parent_conn, child_conn = Pipe()
+        work = env_type(env_id, is_render, idx, child_conn, sticky_action=sticky_action, p=action_prob,
+                        life_done=life_done, history_size=stateStackSize, seed=seed+idx, logger=logger)
+        work.start()
+        works.append(work)
+        parent_conns.append(parent_conn)
+        child_conns.append(child_conn)
+    
+    # Env is ready here
+    output_size = works[0].env.action_space.n
+    input_size = works[0].env.observation_space.shape[0]
+    fig, axs = plt.subplots(num_worker, figsize=(6, 8), constrained_layout=True)
+    plt.ion()
+    next_obs = []
+    for step in range(1000):
+        if every_env_takes_same_action:
+            action = np.random.randint(0, output_size, size=(1,))
+            actions = np.repeat(action, num_worker)
+        else:
+            actions = np.random.randint(0, output_size, size=(num_worker,))
+
+        for parent_conn, action in zip(parent_conns, actions):
+            parent_conn.send(action)
+
+        for parent_conn in parent_conns:
+            s, r, d, _, info = parent_conn.recv()
+            next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
+
+        for i in range(num_worker):
+            axs[i].imshow(next_obs[i].squeeze(0).astype(np.uint8), cmap="gray")
+            axs[i].set_title(f'worker: {i}')
+            axs[i].tick_params(top=False,
+            bottom=False,
+            left=False,
+            right=False,
+            labelleft=False,
+            labelbottom=False)
+        plt.pause(1/60)
+        next_obs = []
+
 
 if __name__ == "__main__":
+    # Test Wrappers:
     # test_MaxStepPerEpisodeWrapper()
     # test_MaxAndSkipEnvWrapper(render=False)
     # test_MontezumaInfoWrapper()
     # test_FrameStackWrapper()
     # test_StickyActionWrapper()
-    test_MonitorWrapper()
+    # test_MonitorWrapper()
+    # test_ResizeAndGrayScaleWrapper()
+    # test_RGBArrayAsObservationWrapper()
+    
+    # Test Custom Parallelized Environments
+    test_CustomEnvironments(env_type='atari', env_id='MontezumaRevengeNoFrameskip-v4') # test AtariEnvironment
+    # test_CustomEnvironments(env_type='mario', env_id='SuperMarioBros-v0') # test MarioEnvironment
+    # test_CustomEnvironments(env_type='mario', env_id='SuperMarioBrosRandomStages-v0') # test MarioEnvironment
+    # test_CustomEnvironments(env_type='classic_control', env_id='CartPole-v1') # test ClassicControlEnvironment
 
     # test_Atari()

@@ -180,7 +180,7 @@ def main(args):
     for idx in range(num_worker):
         parent_conn, child_conn = Pipe()
         work = env_type(env_id, is_render, idx, child_conn, sticky_action=sticky_action, p=action_prob,
-                        life_done=life_done, history_size=stateStackSize, seed=args['seed'], logger=logger)
+                        life_done=life_done, history_size=stateStackSize, seed=args['seed']+idx, logger=logger) # Note that seed+idx is required to make parallel envs play different scenarios
         work.start()
         works.append(work)
         parent_conns.append(parent_conn)

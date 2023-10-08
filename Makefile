@@ -23,3 +23,6 @@ kill:
 
 start_tensorboard:
 	tensorboard --logdir logs/tb_logs
+
+run_tests:
+	python3 test.py --train

@@ -147,6 +147,8 @@ class FrameStackWrapper(gym.Wrapper):
         assert history_size > 1, "history size must be higher than 1"
         self.history_size = history_size
         self.history = np.zeros((history_size, ) + self.env.observation_space.shape)
+        h, w = env.observation_space.shape
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(h, w, history_size), dtype=np.uint8)
 
     def step(self, action):
         state, reward, done, truncated, info = self.env.step(action)
@@ -178,6 +180,34 @@ class StickyActionWrapper(gym.Wrapper):
     def reset(self, **kwargs):
         self.last_action = 0 
         return self.env.reset(**kwargs)
+
+class ResizeAndGrayScaleWrapper(gym.Wrapper):
+    """
+    Resize image and Convert to Grayscale from RGB.
+    """
+    def __init__(self, env, h, w):
+        super().__init__(env)
+        self.h = h
+        self.w = w
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.h, self.w), dtype=np.uint8)
+
+    def step(self, action):
+        state, reward, done, truncated, info = self.env.step(action)
+        state = self.pre_proc(state)
+        return state, reward, done, truncated, info
+
+    def reset(self, **kwargs):
+        state, info = self.env.reset(**kwargs)
+        state = self.pre_proc(state)
+        return state, info
+
+    def pre_proc(self, X):
+        """
+        convert to grayscale and rescale the image
+        """
+        assert X.shape[-1] == 3 # [H, W, 3]
+        x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
+        return x
 
 
 class MontezumaInfoWrapper(gym.Wrapper):
@@ -219,39 +249,36 @@ class AtariEnvironment(Environment):
             life_done=True,
             sticky_action=True,
             p=0.25,
-            stateStackSize=4,
             seed=42,
             logger:Logger=None):
         super(AtariEnvironment, self).__init__()
         self.daemon = True
         self.env = gym.make(env_id, render_mode="rgb_array" if is_render else None)
+        if sticky_action:
+            self.env = StickyActionWrapper(self.env, p)
+        self.env = ResizeAndGrayScaleWrapper(self.env, h, w)
+        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
+        self.env = FrameStackWrapper(self.env, history_size)
         self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
-        self.env = MaxAndSkipEnv(self.env, is_render)
+        self.env = Monitor(self.env)
         if 'Montezuma' in env_id:
             self.env = MontezumaInfoWrapper(self.env, room_address=3 if 'Montezuma' in env_id else 1)
-        self.env = Monitor(self.env)
+        assert self.env.observation_space.shape == (h, w, history_size)
+
         self.logger = logger
         self.env_id = env_id
-        self.is_render = is_render
         self.env_idx = env_idx
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
         self.child_conn = child_conn
 
-        self.sticky_action = sticky_action
-        self.last_action = 0
-        self.p = p
-
-        self.history_size = history_size
-        self.history = np.zeros([history_size, h, w])
-        self.h = h
-        self.w = w
 
         self.seed = seed
-
-        # self.reset(seed=seed)
-        self.reset()
+        # self.env.seed = seed
+        # self.reset()
+        self.reset(seed=seed)
+        # self.env.seed(seed)
 
     def run(self):
         super(AtariEnvironment, self).run()
@@ -261,16 +288,7 @@ class AtariEnvironment(Environment):
             if 'Breakout' in self.env_id:
                 action += 1
 
-            # sticky action
-            if self.sticky_action:
-                if np.random.rand() <= self.p:
-                    action = self.last_action
-                self.last_action = action
-
-            s, reward, done, _, info = self.env.step(action)
-
-            self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
-            self.history[(self.history_size - 1), :, :] = self.pre_proc(s)
+            state, reward, done, _, info = self.env.step(action)
 
             self.rall += reward
 
@@ -285,27 +303,19 @@ class AtariEnvironment(Environment):
                     self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
                         self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist)))
 
-                self.history, _info = self.reset()
+                # state, _info = self.reset()
+                state, _info = self.reset(seed=self.seed)
 
             self.child_conn.send(
-                [self.history[:, :, :], reward, done, _, info])
+                [state, reward, done, _, info])
 
     def reset(self, **kwargs):
-        self.last_action = 0
         self.episode += 1
         self.rall = 0
-        s, info = self.env.reset(**kwargs)
-        self.get_init_state(s)
-        return self.history[:, :, :], info
-
-    def pre_proc(self, X):
-        assert X.shape[-1] == 3 # [H, W, 3]
-        x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
-        return x
-
-    def get_init_state(self, s):
-        for i in range(self.history_size):
-            self.history[i, :, :] = self.pre_proc(s)
+        state, info = self.env.reset(**kwargs)
+        # state, info = self.env.reset()
+        # self.env.seed(self.seed)
+        return state, info
 
 
 class MarioEnvironment(Process):
@@ -318,20 +328,26 @@ class MarioEnvironment(Process):
             history_size=4,
             life_done=False,
             h=84,
-            w=84, movement=COMPLEX_MOVEMENT, sticky_action=True,
+            w=84, movement=COMPLEX_MOVEMENT, 
+            sticky_action=True,
             p=0.25,
             seed=42,
             logger:Logger=None):
         super(MarioEnvironment, self).__init__()
         self.daemon = True
-        self.logger = logger
         self.env = gym_super_mario_bros.make(env_id, apply_api_compatibility=True, render_mode = "rgb_array")
-        self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
+        JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs) # See: https://stackoverflow.com/questions/76509663/typeerror-joypadspace-reset-got-an-unexpected-keyword-argument-seed-when-i
         self.env = JoypadSpace(self.env, COMPLEX_MOVEMENT)
-        self.env = MaxAndSkipEnv(self.env, is_render)
+        if sticky_action:
+            self.env = StickyActionWrapper(self.env, p)
+        self.env = ResizeAndGrayScaleWrapper(self.env, h, w)
+        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
+        self.env = FrameStackWrapper(self.env, history_size)
+        self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
         self.env = Monitor(self.env)
+        assert self.env.observation_space.shape == (h, w, history_size)
 
-        self.is_render = is_render
+        self.logger = logger
         self.env_idx = env_idx
         self.episode = 0
         self.rall = 0
@@ -339,18 +355,14 @@ class MarioEnvironment(Process):
         self.child_conn = child_conn
 
         self.life_done = life_done
-        self.sticky_action = sticky_action
-        self.last_action = 0
-        self.p = p
-
-        self.history_size = history_size
-        self.history = np.zeros([history_size, h, w])
         self.h = h
         self.w = w
 
         self.seed = seed
-        # self.reset(seed=self.seed)
-        self.reset()
+        # self.env.seed = seed
+        # self.reset()
+        self.reset(seed=seed)
+        # self.env.seed(seed)
 
 
     def run(self):
@@ -358,38 +370,29 @@ class MarioEnvironment(Process):
         while True:
             action = self.child_conn.recv()
 
-            # sticky action
-            if self.sticky_action:
-                if np.random.rand() <= self.p:
-                    action = self.last_action
-                self.last_action = action
-
-            obs, r, done, _, info = self.env.step(action)
+            state, reward, done, _, info = self.env.step(action)
 
 
             # when Mario loses life, changes the state to the terminal
             # state.
             force_done = _
             if self.life_done:
-                if self.lives > info['life'] and info['life'] > 0:
+                if self.lives is None:
+                    self.lives = info['life']
+                elif self.lives > info['life'] and info['life'] > 0:
                     force_done = True
                     done = True
                     self.lives = info['life']
-                else:
-                    self.lives = info['life']
 
             # reward range -15 ~ 15
-            r /= 15
-            self.rall += r
+            reward /= 15
+            self.rall += reward
 
             # r_ = int(info.get('flag_get', False)) #TODO: not sure how to use this
 
-            self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
-            self.history[(self.history_size - 1), :, :] = self.pre_proc(obs)
-
-
             if done:
                 self.recent_rlist.append(self.rall)
+
                 self.logger.log_msg_to_both_console_and_file(
                     "[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Stage: {} current x:{}   max x:{}".format(
                         self.episode,
@@ -402,40 +405,22 @@ class MarioEnvironment(Process):
                         info['x_pos'],
                         self.max_pos))
 
-                self.history, _info = self.reset()
+                # state, _info = self.reset()
+                state, _info = self.reset(seed=self.seed)
 
-            self.child_conn.send([self.history[:, :, :], r, done, force_done, info])
+            self.child_conn.send([state, reward, done, force_done, info])
 
     def reset(self, **kwargs):
-        self.last_action = 0
         self.episode += 1
         self.rall = 0
-        self.lives = 3
+        self.lives = None
         self.stage = 1
         self.max_pos = 0
-        obs, info = self.env.reset(**kwargs)
-        self.get_init_state(obs)
+        state, info = self.env.reset(**kwargs)
+        # state, info = self.env.reset()
+        # self.env.seed(self.seed)
+        return state, info
 
-        if self.is_render:
-            # custom rendering
-            rendering_view = self.env.render()
-            self.ax.set_data(rendering_view)
-            plt.xticks([])
-            plt.yticks([])
-            plt.axis
-            plt.pause(1/60)
-            # self.env.render()
-
-        return self.history[:, :, :], info
-
-    def pre_proc(self, X):
-        assert X.shape[-1] == 3 # [H, W, 3]
-        x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
-        return x
-
-    def get_init_state(self, s):
-        for i in range(self.history_size):
-            self.history[i, :, :] = self.pre_proc(s)
 
     
 class RGBArrayAsObservationWrapper(gym.Wrapper):
@@ -475,56 +460,45 @@ class ClassicControlEnvironment(Environment):
             life_done=True,
             sticky_action=True,
             p=0.25,
-            stateStackSize=4,
             seed=42,
             logger:Logger=None):
         super(ClassicControlEnvironment, self).__init__()
         self.daemon = True
         self.env = gym.make(env_id, render_mode="rgb_array")
-        self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
         self.env = RGBArrayAsObservationWrapper(self.env)
-        self.env = MaxAndSkipEnv(self.env, is_render)
+        if sticky_action:
+            self.env = StickyActionWrapper(self.env, p)
+        self.env = ResizeAndGrayScaleWrapper(self.env, h, w)
+        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
+        self.env = FrameStackWrapper(self.env, history_size)
+        self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
         self.env = Monitor(self.env)
+        assert self.env.observation_space.shape == (h, w, history_size)
 
         self.logger = logger
         self.env_id = env_id
-        self.is_render = is_render
         self.env_idx = env_idx
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
         self.child_conn = child_conn
 
-        self.sticky_action = sticky_action
-        self.last_action = 0
-        self.p = p
-
-        self.history_size = history_size
-        self.history = np.zeros([history_size, h, w])
         self.h = h
         self.w = w
 
         self.seed = seed
-
+        # self.env.seed = seed
+        # self.reset()
+        self.reset(seed=seed)
         # self.env.seed(seed)
-        self.reset()
-        # self.reset(seed=seed)
 
     def run(self):
         super(ClassicControlEnvironment, self).run()
         while True:
             action = self.child_conn.recv()
 
-            # sticky action
-            if self.sticky_action:
-                if np.random.rand() <= self.p:
-                    action = self.last_action
-                self.last_action = action
 
-            s, reward, done, _, info = self.env.step(action)
-
-            self.history[:(self.history_size - 1), :, :] = self.history[1:, :, :]
-            self.history[(self.history_size - 1), :, :] = self.pre_proc(s)
+            state, reward, done, _, info = self.env.step(action)
 
             self.rall += reward
 
@@ -533,30 +507,21 @@ class ClassicControlEnvironment(Environment):
                 self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
                     self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist)))
 
-                self.history, _info = self.reset()
+                # state, _info = self.reset()
+                state, _info = self.reset(seed=self.seed)
 
             self.child_conn.send(
-                [self.history[:, :, :], reward, done, _, info])
+                [state, reward, done, _, info])
 
 
     def reset(self, **kwargs):
-        self.last_action = 0
         self.episode += 1
         self.rall = 0
-        # s = self.env.reset(seed=seed)
-        s, info = self.env.reset(**kwargs)
-        self.get_init_state(s)
-        return self.history[:, :, :], info
+        state, info = self.env.reset(**kwargs)
+        # state, info = self.env.reset()
+        # self.env.seed(self.seed)
+        return state, info
 
-    def pre_proc(self, X):
-        assert X.shape[-1] == 3 # [H, W, 3]
-        x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
-        return x
-
-
-    def get_init_state(self, s):
-        for i in range(self.history_size):
-            self.history[i, :, :] = self.pre_proc(s)
 
 
 class Monitor(gym.Wrapper):
