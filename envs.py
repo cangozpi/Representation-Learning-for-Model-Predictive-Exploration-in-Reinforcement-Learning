@@ -57,7 +57,11 @@ def unwrap(env):
 
 class MaxAndSkipEnv(gym.Wrapper):
     def __init__(self, env, is_render, skip=4):
-        """Return only every `skip`-th frame"""
+        """
+        It returns only every skip-th frame. Action are repeated and rewards are sum for the skipped frames.
+        It also takes element-wise maximum over the last two consecutive frames, which helps algorithm deal with the 
+        problem of how certain Atari games only render their sprites every other game frame.
+        """
         gym.Wrapper.__init__(self, env)
         # most recent raw observations (for max pooling across time steps)
         self._obs_buffer = np.zeros((2,) + env.observation_space.shape, dtype=np.uint8)
@@ -117,21 +121,62 @@ class MaxAndSkipEnv(gym.Wrapper):
 
 class MaxStepPerEpisodeWrapper(gym.Wrapper):
     def __init__(self, env, max_step_per_episode):
+        """
+        Let's you call env.step() max_step_per_episode many times before returning done=True, truncated=True
+        """
         super(MaxStepPerEpisodeWrapper, self).__init__(env)
         self.max_step_per_episode = max_step_per_episode
         self.steps = 0
 
     def step(self, action):
-        obs, rew, done, _, info = self.env.step(action)
-        if self.max_step_per_episode < self.steps:
-            done = True
-            _ = True
-
+        obs, reward, done, truncated, info = self.env.step(action)
         self.steps += 1
-        return obs, rew, done, _, info
+        if self.max_step_per_episode <= self.steps:
+            done = True
+            truncated = True
+
+        return obs, reward, done, truncated, info
 
     def reset(self, **kwargs):
         self.steps = 0
+        return self.env.reset(**kwargs)
+
+class FrameStackWrapper(gym.Wrapper):
+    def __init__(self, env, history_size):
+        super().__init__(env)
+        assert history_size > 1, "history size must be higher than 1"
+        self.history_size = history_size
+        self.history = np.zeros((history_size, ) + self.env.observation_space.shape)
+
+    def step(self, action):
+        state, reward, done, truncated, info = self.env.step(action)
+
+        self.history[:(self.history_size - 1)] = self.history[1:, :, :]
+        self.history[(self.history_size - 1)] = state
+
+        return self.history, reward, done, truncated, info
+
+    def reset(self, **kwargs):
+        state, info =  self.env.reset(**kwargs)
+        for i in range(self.history_size):
+            self.history[i] = state
+        return self.history, info
+
+
+class StickyActionWrapper(gym.Wrapper):
+    def __init__(self, env, p):
+        super().__init__(env)
+        self.last_action = 0
+        self.p = p
+
+    def step(self, action):
+        if np.random.rand() <= self.p:
+            action = self.last_action
+        self.last_action = action
+        return self.env.step(action)
+
+    def reset(self, **kwargs):
+        self.last_action = 0 
         return self.env.reset(**kwargs)
 
 
@@ -540,7 +585,7 @@ class Monitor(gym.Wrapper):
             self.episode_lengths.append(eplen)
             self.episode_times.append(time.time() - self.tstart)
             if "episode" not in info:
-                info["episoide"] = {}
+                info["episode"] = {}
             info['episode'].update(epinfo)
         self.total_steps += 1
         return (ob, rew, done, _, info)

@@ -168,7 +168,7 @@ class RNDAgent(object):
         for i in range(self.epoch):
             np.random.shuffle(sample_range)
 
-            total_loss, total_actor_loss, total_critic_loss, total_entropy_loss, total_rnd_loss, total_representation_loss = [], [], [], [], [], []
+            total_loss, total_actor_loss, total_critic_loss, total_critic_loss_int, total_critic_loss_ext, total_entropy_loss, total_rnd_loss, total_representation_loss = [], [], [], [], [], [], [], []
             total_grad_norm_unclipped = []
             if default_config['UseGradClipping']:
                 total_grad_norm_clipped = []
@@ -338,6 +338,8 @@ class RNDAgent(object):
                 total_loss.append(loss.detach().cpu().item())
                 total_actor_loss.append(actor_loss.detach().cpu().item())
                 total_critic_loss.append(0.5 * critic_loss.detach().cpu().item())
+                total_critic_loss_int.append(0.5 * critic_int_loss.detach().cpu().item())
+                total_critic_loss_ext.append(0.5 * critic_ext_loss.detach().cpu().item())
                 total_entropy_loss.append(- self.ent_coef * entropy.detach().cpu().item())
                 total_rnd_loss.append(rnd_loss.detach().cpu().item())
                 if self.representation_model is not None:
@@ -354,7 +356,9 @@ class RNDAgent(object):
             if self.logger is not None:
                 self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss))
                 self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss))
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss vs epoch', np.mean(total_critic_loss))
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss))
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int))
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext))
                 self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss))
                 self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss))
                 if self.representation_model is not None:
