@@ -12,6 +12,7 @@ from collections import defaultdict
 import os
 import datetime
 from os import path
+from matplotlib import pyplot as plt
 
 # train_method = default_config['TrainMethod']
 # if default_config['TrainMethod'] in ['PPO', 'ICM', 'RND']:
@@ -311,6 +312,28 @@ class Logger:
 
         self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
         
+
+class ParallelizedEnvironmentRenderer:
+    def __init__(self, num_envs, figsize=(6, 8)):
+        self.num_envs = num_envs
+        self.fig, self.axs = plt.subplots(num_envs, figsize=figsize, constrained_layout=True)
+        plt.ion()
+
+    def render(self, state):
+        for i in range(self.num_envs):
+            self.axs[i].imshow(state[i].squeeze(0).astype(np.uint8), cmap="gray")
+            self.axs[i].set_title(f'env: {i}')
+            self.axs[i].tick_params(top=False,
+            bottom=False,
+            left=False,
+            right=False,
+            labelleft=False,
+            labelbottom=False)
+        plt.pause(1/60)
+    
+    def close(self):
+        plt.close()
+
 
 def print_config_options():
     print(

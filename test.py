@@ -5,6 +5,7 @@ from envs import MaxStepPerEpisodeWrapper, MaxAndSkipEnv, MontezumaInfoWrapper, 
 import numpy as np
 import matplotlib.pyplot as plt
 from gym.utils import play
+from utils import ParallelizedEnvironmentRenderer
 
 
 def get_env(env_id = "MontezumaRevengeNoFrameskip-v4", **kwargs):
@@ -269,9 +270,9 @@ def test_CustomEnvironments(env_type='atari', env_id='MontezumaRevengeNoFrameski
     # Env is ready here
     output_size = works[0].env.action_space.n
     input_size = works[0].env.observation_space.shape[0]
-    fig, axs = plt.subplots(num_worker, figsize=(6, 8), constrained_layout=True)
-    plt.ion()
-    next_obs = []
+    # fig, axs = plt.subplots(num_worker, figsize=(6, 8), constrained_layout=True)
+    # plt.ion()
+    renderer = ParallelizedEnvironmentRenderer(num_worker)
     for step in range(1000):
         if every_env_takes_same_action:
             action = np.random.randint(0, output_size, size=(1,))
@@ -282,21 +283,25 @@ def test_CustomEnvironments(env_type='atari', env_id='MontezumaRevengeNoFrameski
         for parent_conn, action in zip(parent_conns, actions):
             parent_conn.send(action)
 
+        next_obs = []
         for parent_conn in parent_conns:
             s, r, d, _, info = parent_conn.recv()
             next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
 
-        for i in range(num_worker):
-            axs[i].imshow(next_obs[i].squeeze(0).astype(np.uint8), cmap="gray")
-            axs[i].set_title(f'worker: {i}')
-            axs[i].tick_params(top=False,
-            bottom=False,
-            left=False,
-            right=False,
-            labelleft=False,
-            labelbottom=False)
-        plt.pause(1/60)
-        next_obs = []
+        # for i in range(num_worker):
+        #     axs[i].imshow(next_obs[i].squeeze(0).astype(np.uint8), cmap="gray")
+        #     axs[i].set_title(f'worker: {i}')
+        #     axs[i].tick_params(top=False,
+        #     bottom=False,
+        #     left=False,
+        #     right=False,
+        #     labelleft=False,
+        #     labelbottom=False)
+        # plt.pause(1/60)
+        next_obs = np.stack(next_obs) # -> [num_env, 1, H, W]
+        renderer.render(next_obs)
+        # next_obs = []
+    renderer.close()
 
 
 if __name__ == "__main__":
@@ -310,7 +315,7 @@ if __name__ == "__main__":
     # test_ResizeAndGrayScaleWrapper()
     # test_RGBArrayAsObservationWrapper()
     
-    # Test Custom Parallelized Environments
+    # Test Custom Parallelized Environments:
     test_CustomEnvironments(env_type='atari', env_id='MontezumaRevengeNoFrameskip-v4') # test AtariEnvironment
     # test_CustomEnvironments(env_type='mario', env_id='SuperMarioBros-v0') # test MarioEnvironment
     # test_CustomEnvironments(env_type='mario', env_id='SuperMarioBrosRandomStages-v0') # test MarioEnvironment

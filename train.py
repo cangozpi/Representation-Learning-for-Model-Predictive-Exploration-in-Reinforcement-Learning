@@ -179,7 +179,7 @@ def main(args):
     child_conns = []
     for idx in range(num_worker):
         parent_conn, child_conn = Pipe()
-        work = env_type(env_id, is_render, idx, child_conn, sticky_action=sticky_action, p=action_prob,
+        work = env_type(env_id, False, idx, child_conn, sticky_action=sticky_action, p=action_prob,
                         life_done=life_done, history_size=stateStackSize, seed=args['seed']+idx, logger=logger) # Note that seed+idx is required to make parallel envs play different scenarios
         work.start()
         works.append(work)
@@ -192,6 +192,8 @@ def main(args):
     # normalize obs
     if is_load_model == False:
         logger.log_msg_to_both_console_and_file('Start to initialize observation normalization parameter.....')
+        if is_render:
+            renderer = ParallelizedEnvironmentRenderer(num_worker)
         next_obs = []
         for step in range(num_step * pre_obs_norm_step):
             actions = np.random.randint(0, output_size, size=(num_worker,))
@@ -203,12 +205,18 @@ def main(args):
                 s, r, d, _, info = parent_conn.recv()
                 next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
 
+            if is_render:
+                renderer.render(np.stack(next_obs[-num_worker:]))
             if len(next_obs) % (num_step * num_worker) == 0:
                 next_obs = np.stack(next_obs)
                 obs_rms.update(next_obs)
                 next_obs = []
+        if is_render:
+            renderer.close()
         logger.log_msg_to_both_console_and_file('End to initialize...')
 
+    if is_render:
+        renderer = ParallelizedEnvironmentRenderer(num_worker)
     while True:
         total_state, total_reward, total_done, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy = \
             [], [], [], [], [], [], [], [], []
@@ -257,6 +265,9 @@ def main(args):
             total_policy.append(policy)
 
             states = next_states[:, :, :, :]
+
+            if is_render:
+                renderer.render(next_obs)
 
 
         # calculate last next value
@@ -358,4 +369,7 @@ def main(args):
             os.makedirs('/'.join(save_ckpt_path.split('/')[:-1]), exist_ok=True)
             torch.save(ckpt_dict, save_ckpt_path)
             logger.log_msg_to_both_console_and_file('Saved ckpt at Global Step :{}'.format(global_step))
+    
+    if is_render:
+        renderer.close()
 
