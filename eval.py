@@ -166,7 +166,8 @@ def main(args):
     intrinsic_reward_list = []
     while not rd:
         steps += 1
-        actions, value_ext, value_int, policy = agent.get_action(np.float32(states) / 255.)
+        with torch.no_grad():
+            actions, value_ext, value_int, policy = agent.get_action(np.float32(states) / 255.)
 
         for parent_conn, action in zip(parent_conns, actions):
             parent_conn.send(action)
@@ -179,7 +180,8 @@ def main(args):
             next_obs = s[3, :, :].reshape([1, 1, 84, 84])
 
         # total reward = int reward + ext Reward
-        intrinsic_reward = agent.compute_intrinsic_reward(next_obs)
+        with torch.no_grad():
+            intrinsic_reward = agent.compute_intrinsic_reward(next_obs)
         intrinsic_reward_list.append(intrinsic_reward)
         states = next_states[:, :, :, :]
 
