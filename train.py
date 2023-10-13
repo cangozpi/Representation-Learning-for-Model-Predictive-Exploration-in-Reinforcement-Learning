@@ -36,6 +36,7 @@ def main(args):
         'undiscounted_episode_return': 6,
         'episode_length': 7
     }
+
     logger.GLOBAL_RANK = GLOBAL_RANK
     logger.log_msg_to_both_console_and_file(
         "*" * 30 + "\n" +
@@ -134,7 +135,7 @@ def main(args):
         agent = agent(
             input_size,
             output_size,
-            num_env_workers, #TODO: this should change !!!
+            num_env_workers,
             num_step,
             gamma,
             GAE_Lambda=GAE_Lambda,
@@ -176,7 +177,7 @@ def main(args):
                     # agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                     assert agent.representation_model.backbone is agent.model.feature
                     # agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-                    assert agent.representation_model.backbone is agent.model.feature
+                    # assert agent.representation_model.backbone is agent.model.feature
                 # agent.optimizer.load_state_dict(load_checkpoint['agent.optimizer.state_dict'])
 
             else:
@@ -294,7 +295,7 @@ def main(args):
             global_update += 1
 
             # Step 1. n-step rollout
-            for _ in range(num_step):
+            for step in range(num_step):
                 actions, value_ext, value_int, policy = agent.module.get_action(np.float32(states) / 255.)
                 actions = torch.tensor(actions, dtype=torch.int64)
 
@@ -322,8 +323,11 @@ def main(args):
                         if 'Montezuma' in env_id:
                             info['episode']['number_of_visited_rooms'] = torch.zeros(1, dtype=torch.float64)
                             dist.recv(info['episode']['number_of_visited_rooms'], src=local_env_worker_global_rank, tag=dist_tags['number_of_visited_rooms'])
+                            number_of_visited_rooms.append(info['episode']['number_of_visited_rooms'])
                         dist.recv(info['episode']['undiscounted_episode_return'], src=local_env_worker_global_rank, tag=dist_tags['undiscounted_episode_return'])
                         dist.recv(info['episode']['l'], src=local_env_worker_global_rank, tag=dist_tags['episode_length'])
+                        undiscounted_episode_return.append(info['episode']['undiscounted_episode_return'])
+                        episode_lengths.append(info['episode']['l'])
 
 
                 next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]

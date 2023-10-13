@@ -59,6 +59,12 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
     python3 main.py --train --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00_cont00 --save_model_path=checkpoints/MontezumaRevenge/rnd00_cont00.ckpt --load_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
     ```
 
+    ---
+    Test a RND agent in MontezumaRevenge:
+    ```bash
+    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --eval --config_path=./configs/demo_config.conf --log_name=MontezumaRevenge_rnd00 --load_model_path=checkpoints/rnd00.ckpt
+    ```
+
 ---
 * Profiling with Scalene (Example):
     ```bash

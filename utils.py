@@ -359,16 +359,28 @@ class ParallelizedEnvironmentRenderer:
         plt.ion()
 
     def render(self, state):
-        for i in range(self.num_envs):
-            self.axs[i].imshow(state[i].squeeze(0).astype(np.uint8), cmap="gray")
-            self.axs[i].set_title(f'env: {i}')
-            self.axs[i].tick_params(top=False,
+        if self.num_envs > 1:
+            for i in range(self.num_envs):
+                self.axs[i].imshow(state[i].squeeze(0).astype(np.uint8), cmap="gray")
+                self.axs[i].set_title(f'env: {i}')
+                self.axs[i].tick_params(top=False,
+                bottom=False,
+                left=False,
+                right=False,
+                labelleft=False,
+                labelbottom=False)
+        else:
+            self.axs.imshow(state[0].squeeze(0).astype(np.uint8), cmap="gray")
+            self.axs.set_title(f'env: {0}')
+            self.axs.tick_params(top=False,
             bottom=False,
             left=False,
             right=False,
             labelleft=False,
             labelbottom=False)
+
         plt.pause(1/60)
+
     
     def close(self):
         plt.close()
