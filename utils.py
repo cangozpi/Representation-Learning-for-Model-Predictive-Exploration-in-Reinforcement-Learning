@@ -193,6 +193,11 @@ class Logger:
         self.console_logger.setLevel(logging.DEBUG)
         self.file_logger.setLevel(logging.DEBUG)
 
+        # stop propagting to root logger. Refer to: https://stackoverflow.com/questions/17745914/python-logging-module-is-printing-lines-multiple-times
+        self.console_logger.propagate = False
+        self.file_logger.propagate = False
+
+
         # Initialize TensorBoard --------------------------------------------------------------------
         if tb_log_path is not None:
             # run_name =  datetime.datetime.now().strftime("%Y%m%d-%H%M%S")

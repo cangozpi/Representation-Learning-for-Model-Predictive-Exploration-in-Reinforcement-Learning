@@ -203,6 +203,9 @@ def main(args):
             logger.tb_global_steps = load_checkpoint['logger.tb_global_steps']
 
             logger.log_msg_to_both_console_and_file('loading finished!', only_rank_0=True)
+        
+        if use_cuda: # SyncBatchNorm layers only work with GPU modules
+            agent = nn.SyncBatchNorm.convert_sync_batchnorm(agent, process_group=agents_group) # synchronizes batch norm stats for dist training
 
         agent = DDP(
             agent, 
