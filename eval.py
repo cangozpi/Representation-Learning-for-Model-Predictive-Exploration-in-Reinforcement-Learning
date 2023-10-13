@@ -233,11 +233,11 @@ def main(args):
                     if 'Montezuma' in env_id:
                         info['episode']['number_of_visited_rooms'] = torch.zeros(1, dtype=torch.float64)
                         dist.recv(info['episode']['number_of_visited_rooms'], src=local_env_worker_global_rank, tag=dist_tags['number_of_visited_rooms'])
-                        number_of_visited_rooms.append(info['episode']['number_of_visited_rooms'])
+                        number_of_visited_rooms.append(info['episode']['number_of_visited_rooms'].item())
                     dist.recv(info['episode']['undiscounted_episode_return'], src=local_env_worker_global_rank, tag=dist_tags['undiscounted_episode_return'])
                     dist.recv(info['episode']['l'], src=local_env_worker_global_rank, tag=dist_tags['episode_length'])
-                    undiscounted_episode_return.append(info['episode']['undiscounted_episode_return'])
-                    episode_lengths.append(info['episode']['l'])
+                    undiscounted_episode_return.append(info['episode']['undiscounted_episode_return'].item())
+                    episode_lengths.append(info['episode']['l'].item())
 
 
             # total reward = int reward + ext Reward
