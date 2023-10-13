@@ -23,7 +23,7 @@ from utils import Logger
 import time
 
 import torch.distributed as dist
-import os
+from dist_utils import get_dist_info
 
 train_method = default_config['TrainMethod']
 max_step_per_episode = int(default_config['MaxStepPerEpisode'])
@@ -254,10 +254,7 @@ class AtariEnvironment():
             p=0.25,
             seed=42,
             logger:Logger=None):
-        self.GLOBAL_WORLD_SIZE = int(os.environ["WORLD_SIZE"])
-        self.GLOBAL_RANK = int(os.environ["RANK"])
-        self.LOCAL_WORLD_SIZE = int(os.environ["LOCAL_WORLD_SIZE"])
-        self.LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+        self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
         self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
 
         self.dist_tags = dist_tags
@@ -353,10 +350,7 @@ class MarioEnvironment():
             p=0.25,
             seed=42,
             logger:Logger=None):
-        self.GLOBAL_WORLD_SIZE = int(os.environ["WORLD_SIZE"])
-        self.GLOBAL_RANK = int(os.environ["RANK"])
-        self.LOCAL_WORLD_SIZE = int(os.environ["LOCAL_WORLD_SIZE"])
-        self.LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+        self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
         self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
 
         self.dist_tags = dist_tags
@@ -487,10 +481,7 @@ class ClassicControlEnvironment():
             p=0.25,
             seed=42,
             logger:Logger=None):
-        self.GLOBAL_WORLD_SIZE = int(os.environ["WORLD_SIZE"])
-        self.GLOBAL_RANK = int(os.environ["RANK"])
-        self.LOCAL_WORLD_SIZE = int(os.environ["LOCAL_WORLD_SIZE"])
-        self.LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+        self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
         self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
 
         self.dist_tags = dist_tags

@@ -19,7 +19,13 @@ def main(args):
     logger = Logger(file_log_path=path.join("logs", "file_logs", args['log_name']), tb_log_path=path.join("logs", "tb_logs", args['log_name']))
 
     use_cuda = default_config.getboolean('UseGPU')
-    GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id = ddp_setup(logger, use_cuda)
+    GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK,\
+         gpu_id,\
+             agents_group, env_workers_group,\
+                 agents_group_global_ranks, env_workers_group_global_ranks, env_workers_group_per_node_global_ranks = ddp_setup(logger, use_cuda)
+    
+    dist.barrier() # wait for process initialization logging inside ddp_setup() to finish
+    
     dist_tags = {
         'action': 0,
         'state': 1,
@@ -31,8 +37,16 @@ def main(args):
         'episode_length': 7
     }
     logger.GLOBAL_RANK = GLOBAL_RANK
-    logger.log_msg_to_both_console_and_file(str(dict(**{section: dict(config[section]) for section in config.sections()}, **args)), only_rank_0=True)
-    seed = args['seed'] + GLOBAL_RANK
+    logger.log_msg_to_both_console_and_file(
+        "*" * 30 + "\n" +
+        str(dict(**{section: dict(config[section]) for section in config.sections()}, **args)) + "\n"
+        + f'total number of agent workers: {len(agents_group_global_ranks)}, total number of environment workers: {len(env_workers_group_global_ranks)}, number of agent workers per node: {1}, number of environment workers per node: {len(env_workers_group_per_node_global_ranks)}'
+        + "\n" + "*" * 30,
+        only_rank_0=True
+        )
+
+
+    seed = args['seed'] + GLOBAL_RANK # set different seed to every env_worker process so that every env does not play the same game
     set_seed(seed) # Note: this will not seed the gym environment
 
     train_method = default_config['TrainMethod']
@@ -76,15 +90,14 @@ def main(args):
     use_noisy_net = default_config.getboolean('UseNoisyNet')
 
     GAE_Lambda = float(default_config['GAELambda'])
-    # num_worker = int(default_config['NumEnv'])
-    num_worker = LOCAL_WORLD_SIZE - 1 # -1 is due to process with LOCAL_RANK == 0
+    num_env_workers = len(env_workers_group_per_node_global_ranks)
 
     num_step = int(default_config['NumStep'])
 
     ppo_eps = float(default_config['PPOEps'])
     epoch = int(default_config['Epoch'])
     mini_batch = int(default_config['MiniBatch'])
-    batch_size = int(num_step * num_worker / mini_batch)
+    batch_size = int(num_step * num_env_workers / mini_batch)
     learning_rate = float(default_config['LearningRate'])
     entropy_coef = float(default_config['Entropy'])
     gamma = float(default_config['Gamma'])
@@ -115,16 +128,13 @@ def main(args):
         raise NotImplementedError
 
     
-    agents_group = dist.new_group(ranks=list(filter(lambda x: x != None, [rank if rank % LOCAL_WORLD_SIZE == 0 else None for rank in range(GLOBAL_WORLD_SIZE)])),
-    backend="nccl" if torch.cuda.is_available() else "gloo") # group for agent processes
-    # env_workers_group = dist.new_group(ranks=list(filter(lambda x: x != None, [rank if rank % LOCAL_WORLD_SIZE != 0 else None for rank in range(GLOBAL_WORLD_SIZE)])),
-    # backend="gloo") # group for agent processes
 
-    if LOCAL_RANK == 0: # Agent/Trainer Processes
+    if GLOBAL_RANK in agents_group_global_ranks: # Agent/Trainer Processes
+
         agent = agent(
             input_size,
             output_size,
-            num_worker, #TODO: this should change !!!
+            num_env_workers, #TODO: this should change !!!
             num_step,
             gamma,
             GAE_Lambda=GAE_Lambda,
@@ -204,7 +214,7 @@ def main(args):
 
             logger.log_msg_to_both_console_and_file('loading finished!', only_rank_0=True)
         
-        if use_cuda: # SyncBatchNorm layers only work with GPU modules
+        if "cuda" in gpu_id: # SyncBatchNorm layers only work with GPU modules
             agent = nn.SyncBatchNorm.convert_sync_batchnorm(agent, process_group=agents_group) # synchronizes batch norm stats for dist training
 
         agent = DDP(
@@ -227,7 +237,7 @@ def main(args):
         agent.module.set_mode("train")
 
 
-        states = np.zeros([num_worker, stateStackSize, input_size, input_size])
+        states = np.zeros([num_env_workers, stateStackSize, input_size, input_size])
         
         NUM_LOCAL_ENV_WORKERS = LOCAL_WORLD_SIZE - 1 # number of env worker processes running on the current node
         LOCAL_ENV_WORKER_GLOBAL_RANKS = [GLOBAL_RANK + env_worker_local_rank for env_worker_local_rank in range(1, (NUM_LOCAL_ENV_WORKERS + 1))] # global ranks of the env workers which are working on the current node
@@ -236,18 +246,14 @@ def main(args):
         if is_load_model == False:
             logger.log_msg_to_both_console_and_file('Start to initialize observation normalization parameter.....', only_rank_0=True)
             if is_render:
-                renderer = ParallelizedEnvironmentRenderer(num_worker)
+                renderer = ParallelizedEnvironmentRenderer(num_env_workers)
             next_obs = []
             for step in range(num_step * pre_obs_norm_step):
-                actions = torch.tensor(np.random.randint(0, output_size, size=(num_worker,)), dtype=torch.int64)
+                actions = torch.tensor(np.random.randint(0, output_size, size=(num_env_workers,)), dtype=torch.int64)
 
                 for local_env_worker_global_rank, action in zip(LOCAL_ENV_WORKER_GLOBAL_RANKS, actions):
                     dist.send(action, dst=local_env_worker_global_rank, tag=dist_tags['action'])
                 
-                # for parent_conn, action in zip(parent_conns, actions):
-                #     parent_conn.send(action)
-
-
                 for local_env_worker_global_rank in LOCAL_ENV_WORKER_GLOBAL_RANKS:
                     s, r, d, _ = torch.zeros(stateStackSize, input_size, input_size, dtype=torch.uint8), torch.zeros(1, dtype=torch.float64), torch.zeros(1, dtype=torch.bool), torch.zeros(1, dtype=torch.bool)
                     dist.recv(s, src=local_env_worker_global_rank, tag=dist_tags['state'])
@@ -267,13 +273,10 @@ def main(args):
 
                     next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
                 
-                # for parent_conn in parent_conns:
-                #     s, r, d, _, info = parent_conn.recv()
-                #     next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
 
                 if is_render:
-                    renderer.render(np.stack(next_obs[-num_worker:]))
-                if len(next_obs) % (num_step * num_worker) == 0:
+                    renderer.render(np.stack(next_obs[-num_env_workers:]))
+                if len(next_obs) % (num_step * num_env_workers) == 0:
                     next_obs = np.stack(next_obs)
                     obs_rms.update(next_obs)
                     next_obs = []
@@ -283,11 +286,11 @@ def main(args):
         
 
         if is_render:
-            renderer = ParallelizedEnvironmentRenderer(num_worker)
+            renderer = ParallelizedEnvironmentRenderer(num_env_workers)
         while True:
             total_state, total_reward, total_done, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy = \
                 [], [], [], [], [], [], [], [], []
-            global_step += (num_worker * num_step)
+            global_step += (num_env_workers * num_step)
             global_update += 1
 
             # Step 1. n-step rollout
@@ -298,11 +301,8 @@ def main(args):
                 for idx, local_env_worker_global_rank in enumerate(LOCAL_ENV_WORKER_GLOBAL_RANKS):
                     dist.send(actions[idx], dst=local_env_worker_global_rank, tag=dist_tags['action'])
 
-                # for parent_conn, action in zip(parent_conns, actions):
-                #     parent_conn.send(action)
 
                 next_states, rewards, dones, next_obs = [], [], [], []
-
                 for local_env_worker_global_rank in LOCAL_ENV_WORKER_GLOBAL_RANKS:
                     s, r, d, _ = torch.zeros(stateStackSize, input_size, input_size, dtype=torch.uint8), torch.zeros(1, dtype=torch.float64), torch.zeros(1, dtype=torch.bool), torch.zeros(1, dtype=torch.bool)
                     dist.recv(s, src=local_env_worker_global_rank, tag=dist_tags['state'])
@@ -325,19 +325,6 @@ def main(args):
                         dist.recv(info['episode']['undiscounted_episode_return'], src=local_env_worker_global_rank, tag=dist_tags['undiscounted_episode_return'])
                         dist.recv(info['episode']['l'], src=local_env_worker_global_rank, tag=dist_tags['episode_length'])
 
-
-                # for parent_conn in parent_conns:
-                #     s, r, d, _, info, = parent_conn.recv()
-                #     next_states.append(s)
-                #     rewards.append(r)
-                #     dones.append(d) # --> [num_env]
-                #     next_obs.append(s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]))
-                #     if 'episode' in info:
-                #         if 'Montezuma' in env_id:
-                #             visited_rooms.append(info['episode']['visited_rooms'])
-                #         undiscounted_episode_return.append(info['episode']['undiscounted_episode_return'])
-                #         episode_lengths.append(info['episode']['l'])
-                    
 
                 next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
                 rewards = np.hstack(rewards) # -> [num_env, ]
@@ -399,7 +386,7 @@ def main(args):
                                                 total_ext_values,
                                                 gamma,
                                                 num_step,
-                                                num_worker)
+                                                num_env_workers)
 
             # intrinsic reward calculate
             # None Episodic
@@ -408,7 +395,7 @@ def main(args):
                                                 total_int_values,
                                                 int_gamma,
                                                 num_step,
-                                                num_worker)
+                                                num_env_workers)
 
             # add ext adv and int adv
             total_adv = int_adv * int_coef + ext_adv * ext_coef
@@ -437,7 +424,7 @@ def main(args):
 
 
             # Save checkpoint
-            if global_step % (num_worker * num_step * int(default_config["saveCkptEvery"])) == 0 and GLOBAL_RANK == 0:
+            if global_step % (num_env_workers * num_step * int(default_config["saveCkptEvery"])) == 0 and GLOBAL_RANK == 0:
                 ckpt_dict = {
                     **{
                         'agent.state_dict': agent.module.state_dict()

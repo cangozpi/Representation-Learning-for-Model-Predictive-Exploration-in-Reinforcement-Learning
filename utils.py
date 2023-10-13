@@ -401,7 +401,6 @@ def print_config_options():
 
         # ------ Exploration
         # RND ->
-        -NumEnv: number of parallel environments (i.e. number of parallel processes that runs different environments simulataneously).
         -NumStep: this many steps are taken in every 'NumEnv' many parallel environments before updating the model.
         -MaxStepPerEpisode: maximum number of steps that can be taken per episode.
         -LifeDone: (bool) is related to SuperMarioBros gym environment. When 'True', then an episode ends when Mario looses a life.
