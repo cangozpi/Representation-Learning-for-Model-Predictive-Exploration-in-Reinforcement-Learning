@@ -66,6 +66,12 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
 
     ```
 
+---
+* Torchrun Distributed Training (Example):
+    ```bash
+    torchrun --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=rnd00 --save_model_path=checkpoints/rnd00.ckpt
+    ```
+
 ### Appendix:
 __Model Predictive Exploration:__
 * Random Network Distillation (RND): 

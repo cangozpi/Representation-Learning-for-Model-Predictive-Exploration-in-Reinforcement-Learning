@@ -40,3 +40,6 @@ lib/
 
 *.swp
 *.swo
+
+profile*.html
+profile*.json

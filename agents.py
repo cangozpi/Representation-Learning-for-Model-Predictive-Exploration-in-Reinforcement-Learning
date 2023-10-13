@@ -12,9 +12,10 @@ from utils import global_grad_norm_
 from utils import Logger
 from config import default_config
 
+from torch import nn
 
 
-class RNDAgent(object):
+class RNDAgent(nn.Module):
     def __init__(
             self,
             input_size,
@@ -34,7 +35,9 @@ class RNDAgent(object):
             use_cuda=False,
             use_noisy_net=False,
             representation_lr_method="BYOL",
+            device = None,
             logger:Logger=None):
+        super().__init__()
         self.model = CnnActorCriticNetwork(input_size, output_size, use_noisy_net)
         self.num_env = num_env
         self.output_size = output_size
@@ -49,7 +52,11 @@ class RNDAgent(object):
         self.ppo_eps = ppo_eps
         self.max_grad_norm = max_grad_norm
         self.update_proportion = update_proportion
-        self.device = torch.device('cuda' if use_cuda else 'cpu')
+        # self.device = torch.device('cuda' if use_cuda else 'cpu')
+        if use_cuda:
+            self.device = device
+        else:
+            self.device = 'cpu'
         assert isinstance(logger, Logger)
         self.logger = logger
 
@@ -68,7 +75,7 @@ class RNDAgent(object):
             BYOL_projection_size = int(default_config['BYOL_projectionSize'])
             BYOL_moving_average_decay = float(default_config['BYOL_movingAverageDecay'])
             apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
-            self.representation_model = BYOL(backbone_model, in_features=448, projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
+            self.representation_model = BYOL(backbone_model, in_features=448, projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Augment(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BYOL_representationLossCoef'])
         # --------------------------------------------------------------------------------
@@ -82,7 +89,7 @@ class RNDAgent(object):
             projection_sizes = json.loads(default_config['BarlowTwinsProjectionSizes'])
             BarlowTwinsLambda = float(default_config['BarlowTwinsLambda'])
             apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
-            self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda) # Model used to perform representation learning (e.g. BYOL)
+            self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Transform(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
@@ -327,10 +334,10 @@ class RNDAgent(object):
                     grad_norm_clipped = global_grad_norm_(self.get_agent_parameters())
                 # Log final model grads in detail
                 if i == self.epoch - 1:
-                    self.logger.log_gradients_in_model_to_tb_without_step(self.model,'PPO', log_full_detail=True)
-                    self.logger.log_gradients_in_model_to_tb_without_step(self.rnd, 'RND', log_full_detail=True)
+                    self.logger.log_gradients_in_model_to_tb_without_step(self.model,'PPO', log_full_detail=True, only_rank_0=True)
+                    self.logger.log_gradients_in_model_to_tb_without_step(self.rnd, 'RND', log_full_detail=True, only_rank_0=True)
                     if self.representation_model is not None:
-                        self.logger.log_gradients_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', log_full_detail=True)
+                        self.logger.log_gradients_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', log_full_detail=True, only_rank_0=True)
 
                 self.optimizer.step()
 
@@ -354,20 +361,20 @@ class RNDAgent(object):
             
             # logging
             if self.logger is not None:
-                self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss))
-                self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss))
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss))
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int))
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext))
-                self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss))
-                self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss))
+                self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
                 if self.representation_model is not None:
-                    self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss))
-                self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped))
+                    self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), only_rank_0=True)
                 if default_config['UseGradClipping']:
-                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped))
+                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), only_rank_0=True)
                 # Log final model parameters in detail
-                self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO')
-                self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND')
+                self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO', only_rank_0=True)
+                self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
                 if self.representation_model is not None:
-                    self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}')
+                    self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)

@@ -121,7 +121,8 @@ class BYOL(nn.Module):
             projection_hidden_size=4096,
             moving_average_decay=0.99,
             use_momentum=True,
-            use_cuda=False):
+            use_cuda=False,
+            device = None):
         """
         Args:
             net: model to be trained (i.e. backbone, feature extractor, f_theta)
@@ -144,7 +145,11 @@ class BYOL(nn.Module):
         self.target_ema_updater = EMA(moving_average_decay)
         self.online_predictor = MLP(projection_size, projection_size, projection_size * 2)
 
-        self.device = torch.device('cuda' if use_cuda else 'cpu')
+        # self.device = torch.device('cuda' if use_cuda else 'cpu')
+        if use_cuda:
+            self.device = device
+        else:
+            self.device = 'cpu'
         self.online_model = self.online_model.to(self.device)
         self.target_model = self.target_model.to(self.device)
         self.online_predictor = self.online_predictor.to(self.device)

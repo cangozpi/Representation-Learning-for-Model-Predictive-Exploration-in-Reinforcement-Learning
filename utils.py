@@ -199,7 +199,9 @@ class Logger:
             self.tb_summaryWriter = SummaryWriter(tb_log_path)
 
             self.tb_global_steps = defaultdict(init_tb_global_step)
-
+        
+        self.GLOBAL_RANK = None
+        
     def log_msg_to_console(self, msg):
         """
         Passed in message will be logged to console.
@@ -214,13 +216,20 @@ class Logger:
         mgs = '\n' + msg + '\n'
         self.file_logger.info(msg)
     
-    def log_msg_to_both_console_and_file(self, msg):
+    def log_msg_to_both_console_and_file(self, msg, only_rank_0 =False):
         """
         Passed in message will be logged to both console and file.
         """
-        mgs = '\n' + msg + '\n'
-        self.console_logger.info(msg)
-        self.file_logger.info(msg)
+        def log():
+            mgs = '\n' + msg + '\n'
+            self.console_logger.info(msg)
+            self.file_logger.info(msg)
+
+        if only_rank_0:
+            if self.GLOBAL_RANK == 0:
+                log()
+        else:
+            log()
 
     def log_dict_to_file(self, info_dict):
         """
@@ -242,15 +251,26 @@ class Logger:
         log_str += '\n'
         self.file_logger.info(log_str)
     
-    def log_scalar_to_tb_without_step(self, tag, scalar_value):
-        global_step = self.tb_global_steps[tag] # get current global_step for the tag
-        self.tb_summaryWriter.add_scalar(tag, scalar_value, global_step) # log scalar to tb
-        self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
+    def log_scalar_to_tb_without_step(self, tag, scalar_value, only_rank_0=True):
+        def log():
+            global_step = self.tb_global_steps[tag] # get current global_step for the tag
+            self.tb_summaryWriter.add_scalar(tag, scalar_value, global_step) # log scalar to tb
+            self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
 
-    def log_scalar_to_tb_with_step(self, tag, scalar_value, step):
-        self.tb_summaryWriter.add_scalar(tag, scalar_value, step) # log scalar to tb
+        if only_rank_0:
+            if self.GLOBAL_RANK == 0:
+                log()
+        else:
+            log()
+
+    def log_scalar_to_tb_with_step(self, tag, scalar_value, step, only_rank_0=False):
+        if only_rank_0:
+            if self.GLOBAL_RANK == 0:
+                self.tb_summaryWriter.add_scalar(tag, scalar_value, step) # log scalar to tb
+        else:
+            self.tb_summaryWriter.add_scalar(tag, scalar_value, step) # log scalar to tb
     
-    def log_gradients_in_model_to_tb_without_step(self, model, model_name, log_full_detail=False):
+    def log_gradients_in_model_to_tb_without_step(self, model, model_name, log_full_detail=False, only_rank_0=True):
         """
         Logs information (grads, means, ...) about the the parameters of the given model to tensorboard.
         Inputs:
@@ -258,38 +278,45 @@ class Logger:
             model_name (str): information will be logged under the given model_name in tensorboard
             log_full_detail (bool): if False, just logs norm of the overall grdients. If True, logs more detailed info per weights and biases.
         """
-        tag = f'log_gradients_in_model_{model_name}'
-        global_step = self.tb_global_steps[tag] # get current global_step for the tag
+        def log():
+            tag = f'log_gradients_in_model_{model_name}'
+            global_step = self.tb_global_steps[tag] # get current global_step for the tag
 
-        all_weight_grads = torch.tensor([])
-        all_bias_grads = torch.tensor([])
-        # Log gradients to Tensorboard
-        for name, param in model.named_parameters():
-            if param.grad is None:
-                continue
-            if "weight" in name: # Model weight
-                if log_full_detail:
-                    self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step)
-                    self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), global_step)
+            all_weight_grads = torch.tensor([])
+            all_bias_grads = torch.tensor([])
+            # Log gradients to Tensorboard
+            for name, param in model.named_parameters():
+                if param.grad is None:
+                    continue
+                if "weight" in name: # Model weight
+                    if log_full_detail:
+                        self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step)
+                        self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), global_step)
 
-                all_weight_grads = torch.concat([all_weight_grads, param.grad.cpu().reshape(-1)])
+                    all_weight_grads = torch.concat([all_weight_grads, param.grad.cpu().reshape(-1)])
 
-            elif "bias" in name: # Model bias
-                if log_full_detail:
-                    self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step)
-                    self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), global_step)
+                elif "bias" in name: # Model bias
+                    if log_full_detail:
+                        self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step)
+                        self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), global_step)
 
-                all_bias_grads = torch.concat([all_bias_grads, param.grad.cpu().reshape(-1)])
+                    all_bias_grads = torch.concat([all_bias_grads, param.grad.cpu().reshape(-1)])
         
-        # Log norm of all the model grads concatenated together to form one giant vector
-        all_weight_grads_norm = torch.norm(all_weight_grads, 2)
-        all_bias_grads_norm = torch.norm(all_bias_grads, 2)
-        self.tb_summaryWriter.add_scalar("all_weight_grads_norm/"+model_name, all_weight_grads_norm.item(), global_step)
-        self.tb_summaryWriter.add_scalar("all_bias_grads_norm/"+model_name, all_bias_grads_norm.item(), global_step)
+            # Log norm of all the model grads concatenated together to form one giant vector
+            all_weight_grads_norm = torch.norm(all_weight_grads, 2)
+            all_bias_grads_norm = torch.norm(all_bias_grads, 2)
+            self.tb_summaryWriter.add_scalar("all_weight_grads_norm/"+model_name, all_weight_grads_norm.item(), global_step)
+            self.tb_summaryWriter.add_scalar("all_bias_grads_norm/"+model_name, all_bias_grads_norm.item(), global_step)
 
-        self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
+            self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
 
-    def log_parameters_in_model_to_tb_without_step(self, model, model_name):
+        if only_rank_0:
+            if self.GLOBAL_RANK == 0:
+                log()
+        else:
+            log()
+
+    def log_parameters_in_model_to_tb_without_step(self, model, model_name, only_rank_0=False):
         """
         Logs information (weights, biases, means, ...) about the the parameters of the given model to tensorboard.
         Inputs:
@@ -297,20 +324,27 @@ class Logger:
             model_name (str): information will be logged under the given model_name in tensorboard
             log_full_detail (bool): if False, just logs norm of the overall grdients. If True, logs more detailed info per weights and biases.
         """
-        tag = f'log_parameters_in_model_{model_name}'
-        global_step = self.tb_global_steps[tag] # get current global_step for the tag
+        def log():
+            tag = f'log_parameters_in_model_{model_name}'
+            global_step = self.tb_global_steps[tag] # get current global_step for the tag
 
-        # Log weights and biases to Tensorboard
-        for name, param in model.named_parameters():
-            if "weight" in name: # Model weight
-                self.tb_summaryWriter.add_histogram("weight/"+model_name+"/"+name, param, global_step)
-                self.tb_summaryWriter.add_scalar("weight.mean/"+model_name+"/"+name, param.mean(), global_step)
+            # Log weights and biases to Tensorboard
+            for name, param in model.named_parameters():
+                if "weight" in name: # Model weight
+                    self.tb_summaryWriter.add_histogram("weight/"+model_name+"/"+name, param, global_step)
+                    self.tb_summaryWriter.add_scalar("weight.mean/"+model_name+"/"+name, param.mean(), global_step)
 
-            elif "bias" in name: # Model bias
-                self.tb_summaryWriter.add_histogram("bias/"+model_name+"/"+name, param, global_step)
-                self.tb_summaryWriter.add_scalar("bias.mean/"+model_name+"/"+name, param.mean(), global_step)
+                elif "bias" in name: # Model bias
+                    self.tb_summaryWriter.add_histogram("bias/"+model_name+"/"+name, param, global_step)
+                    self.tb_summaryWriter.add_scalar("bias.mean/"+model_name+"/"+name, param.mean(), global_step)
 
-        self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
+            self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
+
+        if only_rank_0:
+            if self.GLOBAL_RANK == 0:
+                log()
+        else:
+            log()
         
 
 class ParallelizedEnvironmentRenderer:

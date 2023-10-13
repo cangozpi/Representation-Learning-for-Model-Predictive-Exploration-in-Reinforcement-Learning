@@ -9,7 +9,7 @@ import random
 
 
 class BarlowTwins(nn.Module):
-    def __init__(self, backbone, in_features=2048, projection_sizes=[8192, 8192, 8192], lambd=0.0051, use_cuda=False):
+    def __init__(self, backbone, in_features=2048, projection_sizes=[8192, 8192, 8192], lambd=0.0051, use_cuda=False, device=None):
         super().__init__()
         self.backbone = backbone
         self.lambd = lambd
@@ -27,7 +27,11 @@ class BarlowTwins(nn.Module):
         # normalization layer for the representations z1 and z2
         self.bn = nn.BatchNorm1d(sizes[-1], affine=False)
 
-        self.device = torch.device('cuda' if use_cuda else 'cpu')
+        # self.device = torch.device('cuda' if use_cuda else 'cpu')
+        if use_cuda:
+            self.device = device
+        else:
+            self.device = 'cpu'
         self.backbone = self.backbone.to(self.device)
         self.projector = self.projector.to(self.device)
     

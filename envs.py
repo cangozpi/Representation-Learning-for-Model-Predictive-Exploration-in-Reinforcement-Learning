@@ -22,6 +22,9 @@ import matplotlib.pyplot as plt
 from utils import Logger
 import time
 
+import torch.distributed as dist
+import os
+
 train_method = default_config['TrainMethod']
 max_step_per_episode = int(default_config['MaxStepPerEpisode'])
 
@@ -236,13 +239,13 @@ class MontezumaInfoWrapper(gym.Wrapper):
         return self.env.reset(**kwargs)
 
 
-class AtariEnvironment(Environment):
+class AtariEnvironment():
     def __init__(
             self,
             env_id,
             is_render,
             env_idx,
-            child_conn,
+            dist_tags,
             history_size=4,
             h=84,
             w=84,
@@ -251,8 +254,14 @@ class AtariEnvironment(Environment):
             p=0.25,
             seed=42,
             logger:Logger=None):
-        super(AtariEnvironment, self).__init__()
-        self.daemon = True
+        self.GLOBAL_WORLD_SIZE = int(os.environ["WORLD_SIZE"])
+        self.GLOBAL_RANK = int(os.environ["RANK"])
+        self.LOCAL_WORLD_SIZE = int(os.environ["LOCAL_WORLD_SIZE"])
+        self.LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+        self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
+
+        self.dist_tags = dist_tags
+
         self.env = gym.make(env_id, render_mode="rgb_array" if is_render else None)
         if sticky_action:
             self.env = StickyActionWrapper(self.env, p)
@@ -271,8 +280,8 @@ class AtariEnvironment(Environment):
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
-        self.child_conn = child_conn
 
+        self.action_dim = self.env.action_space.shape
 
         self.seed = seed
         # self.env.seed = seed
@@ -280,10 +289,12 @@ class AtariEnvironment(Environment):
         self.reset(seed=seed)
         # self.env.seed(seed)
 
+    # from torch.distributed.elastic.multiprocessing.errors import record
+    # @record
     def run(self):
-        super(AtariEnvironment, self).run()
         while True:
-            action = self.child_conn.recv()
+            action = torch.zeros(self.action_dim, dtype=torch.int64)
+            dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
 
             if 'Breakout' in self.env_id:
                 action += 1
@@ -295,19 +306,28 @@ class AtariEnvironment(Environment):
             if done:
                 self.recent_rlist.append(self.rall)
 
+
                 if 'Montezuma' in self.env_id:
-                    self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
-                        self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist),
-                        info.get('episode', {}).get('visited_rooms', {})))
+                    self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}, visited_rooms: {info.get("episode", {}).get("visited_rooms", {})}')
                 else:
-                    self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
-                        self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist)))
+                    self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}')
 
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            self.child_conn.send(
-                [state, reward, done, _, info])
+            dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
+            dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
+            dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
+            dist.send(torch.tensor(_, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+
+            if done:
+                if 'Montezuma' in self.env_id:
+                    dist.send(torch.tensor(len(info['episode']['visited_rooms']), dtype=torch.float64), dst=0, tag=self.dist_tags['number_of_visited_rooms'])
+                dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
+                dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+
+
+            # dist.gather_object(info, None, dst=0)
 
     def reset(self, **kwargs):
         self.episode += 1
@@ -318,13 +338,13 @@ class AtariEnvironment(Environment):
         return state, info
 
 
-class MarioEnvironment(Process):
+class MarioEnvironment():
     def __init__(
             self,
             env_id,
             is_render,
             env_idx,
-            child_conn,
+            dist_tags,
             history_size=4,
             life_done=False,
             h=84,
@@ -333,8 +353,14 @@ class MarioEnvironment(Process):
             p=0.25,
             seed=42,
             logger:Logger=None):
-        super(MarioEnvironment, self).__init__()
-        self.daemon = True
+        self.GLOBAL_WORLD_SIZE = int(os.environ["WORLD_SIZE"])
+        self.GLOBAL_RANK = int(os.environ["RANK"])
+        self.LOCAL_WORLD_SIZE = int(os.environ["LOCAL_WORLD_SIZE"])
+        self.LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+        self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
+
+        self.dist_tags = dist_tags
+
         self.env = gym_super_mario_bros.make(env_id, apply_api_compatibility=True, render_mode = "rgb_array")
         JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs) # See: https://stackoverflow.com/questions/76509663/typeerror-joypadspace-reset-got-an-unexpected-keyword-argument-seed-when-i
         self.env = JoypadSpace(self.env, COMPLEX_MOVEMENT)
@@ -352,11 +378,12 @@ class MarioEnvironment(Process):
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
-        self.child_conn = child_conn
 
         self.life_done = life_done
         self.h = h
         self.w = w
+
+        self.action_dim = self.env.action_space.shape
 
         self.seed = seed
         # self.env.seed = seed
@@ -366,12 +393,15 @@ class MarioEnvironment(Process):
 
 
     def run(self):
-        super(MarioEnvironment, self).run()
         while True:
-            action = self.child_conn.recv()
+            action = torch.zeros(self.action_dim, dtype=torch.int64)
+            dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
 
-            state, reward, done, _, info = self.env.step(action)
+            state, reward, done, _, info = self.env.step(action.item())
 
+            # reward range -15 ~ 15
+            reward /= 15
+            self.rall += reward
 
             # when Mario loses life, changes the state to the terminal
             # state.
@@ -384,31 +414,26 @@ class MarioEnvironment(Process):
                     done = True
                     self.lives = info['life']
 
-            # reward range -15 ~ 15
-            reward /= 15
-            self.rall += reward
 
             # r_ = int(info.get('flag_get', False)) #TODO: not sure how to use this
 
             if done:
                 self.recent_rlist.append(self.rall)
 
-                self.logger.log_msg_to_both_console_and_file(
-                    "[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Stage: {} current x:{}   max x:{}".format(
-                        self.episode,
-                        self.env_idx,
-                        self.env.steps,
-                        self.rall,
-                        np.mean(
-                            self.recent_rlist),
-                        info['stage'],
-                        info['x_pos'],
-                        self.max_pos))
+                self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}, visited_rooms: {info.get("episode", {}).get("visited_rooms", {})}, stage: {info["stage"]}, current_x: {info["x_pos"]}, max_x: {self.max_pos}')
 
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            self.child_conn.send([state, reward, done, force_done, info])
+            dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
+            dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
+            dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
+            dist.send(torch.tensor(_, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+
+            if done:
+                dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
+                dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+
 
     def reset(self, **kwargs):
         self.episode += 1
@@ -447,13 +472,13 @@ class RGBArrayAsObservationWrapper(gym.Wrapper):
         return obs, reward, done, _, info
 
 
-class ClassicControlEnvironment(Environment):
+class ClassicControlEnvironment():
     def __init__(
             self,
             env_id,
             is_render,
             env_idx,
-            child_conn,
+            dist_tags,
             history_size=4,
             h=84,
             w=84,
@@ -462,8 +487,14 @@ class ClassicControlEnvironment(Environment):
             p=0.25,
             seed=42,
             logger:Logger=None):
-        super(ClassicControlEnvironment, self).__init__()
-        self.daemon = True
+        self.GLOBAL_WORLD_SIZE = int(os.environ["WORLD_SIZE"])
+        self.GLOBAL_RANK = int(os.environ["RANK"])
+        self.LOCAL_WORLD_SIZE = int(os.environ["LOCAL_WORLD_SIZE"])
+        self.LOCAL_RANK = int(os.environ["LOCAL_RANK"])
+        self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
+
+        self.dist_tags = dist_tags
+
         self.env = gym.make(env_id, render_mode="rgb_array")
         self.env = RGBArrayAsObservationWrapper(self.env)
         if sticky_action:
@@ -481,10 +512,11 @@ class ClassicControlEnvironment(Environment):
         self.episode = 0
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
-        self.child_conn = child_conn
 
         self.h = h
         self.w = w
+
+        self.action_dim = self.env.action_space.shape
 
         self.seed = seed
         # self.env.seed = seed
@@ -493,25 +525,32 @@ class ClassicControlEnvironment(Environment):
         # self.env.seed(seed)
 
     def run(self):
-        super(ClassicControlEnvironment, self).run()
         while True:
-            action = self.child_conn.recv()
+            action = torch.zeros(self.action_dim, dtype=torch.int64)
+            dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
 
 
-            state, reward, done, _, info = self.env.step(action)
+            state, reward, done, _, info = self.env.step(action.numpy())
 
             self.rall += reward
 
             if done:
                 self.recent_rlist.append(self.rall)
-                self.logger.log_msg_to_both_console_and_file("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
-                    self.episode, self.env_idx, self.env.steps, self.rall, np.mean(self.recent_rlist)))
+
+                self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}')
 
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            self.child_conn.send(
-                [state, reward, done, _, info])
+            dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
+            dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
+            dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
+            dist.send(torch.tensor(_, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+
+            if done:
+                dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
+                dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+
 
 
     def reset(self, **kwargs):
