@@ -410,11 +410,11 @@ def main(args):
             # -----------------------------------------------
 
             # Step 5. Training!
-            logger.log_msg_to_both_console_and_file("ENTERED TRAINING:", only_rank_0=True)
+            logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | ENTERED TRAINING:')
             agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
                             total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
                             total_policy, global_update)
-            logger.log_msg_to_both_console_and_file("EXITTED TRAINING", only_rank_0=True)
+            logger.log_msg_to_both_console_and_file("[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | EXITTED TRAINING")
 
 
             # Logging

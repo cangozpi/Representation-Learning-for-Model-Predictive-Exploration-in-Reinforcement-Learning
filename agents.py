@@ -177,7 +177,7 @@ class RNDAgent(nn.Module):
 
             total_loss, total_actor_loss, total_critic_loss, total_critic_loss_int, total_critic_loss_ext, total_entropy_loss, total_rnd_loss, total_representation_loss = [], [], [], [], [], [], [], []
             total_grad_norm_unclipped = []
-            if default_config['UseGradClipping']:
+            if default_config.getboolean('UseGradClipping'):
                 total_grad_norm_clipped = []
 
             for j in range(int(len(states) / self.batch_size)):
@@ -329,11 +329,11 @@ class RNDAgent(nn.Module):
                 loss.backward()
 
                 grad_norm_unclipped = global_grad_norm_(self.get_agent_parameters())
-                if default_config['UseGradClipping']:
+                if default_config.getboolean('UseGradClipping'):
                     nn.utils.clip_grad_norm_(self.get_agent_parameters(), self.max_grad_norm) # gradient clipping
                     grad_norm_clipped = global_grad_norm_(self.get_agent_parameters())
                 # Log final model grads in detail
-                if i == self.epoch - 1:
+                if i == self.epoch - 1 and default_config.getboolean('verbose_logging') == True:
                     self.logger.log_gradients_in_model_to_tb_without_step(self.model,'PPO', log_full_detail=True, only_rank_0=True)
                     self.logger.log_gradients_in_model_to_tb_without_step(self.rnd, 'RND', log_full_detail=True, only_rank_0=True)
                     if self.representation_model is not None:
@@ -352,7 +352,7 @@ class RNDAgent(nn.Module):
                 if self.representation_model is not None:
                     total_representation_loss.append(self.representation_loss_coef * representation_loss.detach().cpu().item())
                 total_grad_norm_unclipped.append(grad_norm_unclipped)
-                if default_config['UseGradClipping']:
+                if default_config.getboolean('UseGradClipping') == True:
                     total_grad_norm_clipped.append(grad_norm_clipped)
 
                 # EMA update BYOL target network params
@@ -370,11 +370,12 @@ class RNDAgent(nn.Module):
                 self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
                 if self.representation_model is not None:
                     self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
-                self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), only_rank_0=True)
-                if default_config['UseGradClipping']:
-                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), only_rank_0=True)
-                # Log final model parameters in detail
-                self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO', only_rank_0=True)
-                self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
-                if self.representation_model is not None:
-                    self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)
+                if default_config.getboolean('verbose_logging') == True:
+                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), only_rank_0=True)
+                    if default_config.getboolean('UseGradClipping') == True:
+                        self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), only_rank_0=True)
+                    # Log final model parameters in detail
+                    self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO', only_rank_0=True)
+                    self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
+                    if self.representation_model is not None:
+                        self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)

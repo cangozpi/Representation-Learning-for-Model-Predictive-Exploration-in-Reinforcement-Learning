@@ -456,6 +456,7 @@ def print_config_options():
         -loadModel: if 'True', a training checkpoint (model, optimizer, epoch, ...) is loaded from the path specified by the command line argument passed to '--load_model_path'.
         -render: if 'True', then environments are rendered simultaneously on a new window. During training (i.e. '--train') do not set this to 'True' since multiple environments are playing out simultaneously. Set to 'True' during evaluation mode (i.e. '--eval').
         -saveCkptEvery: after every this many episodes during training a checkpoint is saved.
+        -verbose_logging: if 'True', then a more verbose logging is applied (logging of model parameter statistics and gradients). Note that this might slow down your training.
         -StableEps = 1e-8
         -UseGPU: if 'True' then GPU (cuda) is used, else CPU.
         -UseGradClipping: (bool) If True, then gradient clipping (max grad norm = 'MaxGradNorm') is used.
