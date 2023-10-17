@@ -325,7 +325,8 @@ class RNDAgent(nn.Module):
                 # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
-                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss
+                # loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss
+                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy # TODO: sil bu satırı ve üsttekini uncommentle !!!
                 loss.backward()
 
                 grad_norm_unclipped = global_grad_norm_(self.get_agent_parameters())

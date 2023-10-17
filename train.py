@@ -204,7 +204,7 @@ def main(args):
 
             obs_rms = load_checkpoint['obs_rms']
             reward_rms = load_checkpoint['reward_rms']
-            discounted_reward: load_checkpoint['discounted_reward']
+            discounted_reward = load_checkpoint['discounted_reward']
             global_update = load_checkpoint['global_update']
             global_step = load_checkpoint['global_step']
             undiscounted_episode_return = load_checkpoint['undiscounted_episode_return']

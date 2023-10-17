@@ -84,7 +84,7 @@ class CnnActorCriticNetwork(nn.Module):
 
         self.feature = nn.Sequential(
             nn.Conv2d(
-                in_channels=4,
+                in_channels=4, # TODO: this equals StateStackSize
                 out_channels=32,
                 kernel_size=8,
                 stride=4),
