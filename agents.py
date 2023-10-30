@@ -60,7 +60,8 @@ class RNDAgent(nn.Module):
         assert isinstance(logger, Logger)
         self.logger = logger
 
-        self.rnd = RNDModel(input_size, output_size)
+        extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
+        self.rnd = RNDModel(input_size=extracted_feature_embedding_dim, output_size=512)
         
         assert representation_lr_method in ['None', "BYOL", "Barlow-Twins"]
         self.representation_lr_method = representation_lr_method
@@ -165,8 +166,17 @@ class RNDAgent(nn.Module):
         intrinsic_reward = (target_next_feature - predict_next_feature).pow(2).sum(1) / 2
 
         return intrinsic_reward.data.cpu().numpy()
+    
+    def extract_feature_embeddings(self, states):
+        """
+        Extracts feature embedding using the backbone model of PPO. Note that this backbone (feature extractor) model is
+        what is used as the shared feature extractor in our proposed approach.
+        """
+        states = torch.FloatTensor(states).to(self.device)
+        extracted_feature_embeddings = self.model.feature(states)
+        return extracted_feature_embeddings
 
-    def train_model(self, states, target_ext, target_int, y, adv, next_obs, old_policy, global_update):
+    def train_model(self, states, target_ext, target_int, y, adv, normalized_extracted_feature_embeddings, old_policy, global_update):
         sample_range = np.arange(len(states))
         forward_mse = nn.MSELoss(reduction='none')
 
@@ -189,7 +199,7 @@ class RNDAgent(nn.Module):
                 target_int_batch = torch.FloatTensor(target_int)[batch_indices].to(self.device)
                 y_batch = torch.LongTensor(y)[batch_indices].to(self.device)
                 adv_batch = torch.FloatTensor(adv)[batch_indices].to(self.device)
-                next_obs_batch = torch.FloatTensor(next_obs)[batch_indices].to(self.device)
+                normalized_extracted_feature_embeddings_batch = torch.FloatTensor(normalized_extracted_feature_embeddings)[batch_indices].to(self.device)
                 with torch.no_grad():
                     policy_old_list = torch.stack(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[batch_indices].to(self.device)
                     m_old = Categorical(F.softmax(policy_old_list, dim=-1))
@@ -198,7 +208,8 @@ class RNDAgent(nn.Module):
 
                 # --------------------------------------------------------------------------------
                 # for Curiosity-driven(Random Network Distillation)
-                predict_next_state_feature, target_next_state_feature = self.rnd(next_obs_batch)
+                # Note that gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                predict_next_state_feature, target_next_state_feature = self.rnd(normalized_extracted_feature_embeddings_batch)
 
                 rnd_loss = forward_mse(predict_next_state_feature, target_next_state_feature.detach()).mean(-1)
                 # Proportion of exp used for predictor update

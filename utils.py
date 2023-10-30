@@ -63,9 +63,19 @@ class RunningMeanStd(object):
         self.count = epsilon
 
     def update(self, x):
-        batch_mean = np.mean(x, axis=0)
-        batch_var = np.var(x, axis=0)
-        batch_count = x.shape[0]
+        # note that x is of shape [B=(num_step * num_env_workers), extracted_feature_embeddings_dim]
+        batch_mean = np.mean(x, axis=0, keepdims=True) # [1, extracted_feature_embeddings_dim]
+        batch_var = np.var(x, axis=0, keepdims=True) # [1, extracted_feature_embeddings_dim]
+        batch_count = x.shape[0] # = num_step * num_env_workers
+
+        # --
+        # Below is the old code used for normalizing image observations. Kept for reference:
+        # note that x is of shape [B=(num_step * num_env_workers), stateStackSize, input_size, input_size]
+        # batch_mean = np.mean(x, axis=0) # [stateStackSize, input_size, input_size]
+        # batch_var = np.var(x, axis=0) # [stateStackSize, input_size, input_size]
+        # batch_count = x.shape[0] # = num_step * num_env_workers
+        # --
+
         self.update_from_moments(batch_mean, batch_var, batch_count)
 
     def update_from_moments(self, batch_mean, batch_var, batch_count):
