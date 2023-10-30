@@ -488,10 +488,10 @@ class ClassicControlEnvironment():
 
         self.env = gym.make(env_id, render_mode="rgb_array")
         self.env = RGBArrayAsObservationWrapper(self.env)
-        if sticky_action:
-            self.env = StickyActionWrapper(self.env, p)
+        # if sticky_action:
+        #     self.env = StickyActionWrapper(self.env, p)
         self.env = ResizeAndGrayScaleWrapper(self.env, h, w)
-        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
+        # self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
         self.env = FrameStackWrapper(self.env, history_size)
         self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
         self.env = Monitor(self.env)

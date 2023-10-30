@@ -82,74 +82,122 @@ class CnnActorCriticNetwork(nn.Module):
         else:
             linear = nn.Linear
 
+        # self.feature = nn.Sequential(
+        #     nn.Conv2d(
+        #         in_channels=4, # TODO: this equals StateStackSize
+        #         out_channels=32,
+        #         kernel_size=8,
+        #         stride=4),
+        #     nn.ReLU(),
+        #     nn.Conv2d(
+        #         in_channels=32,
+        #         out_channels=64,
+        #         kernel_size=4,
+        #         stride=2),
+        #     nn.ReLU(),
+        #     nn.Conv2d(
+        #         in_channels=64,
+        #         out_channels=64,
+        #         kernel_size=3,
+        #         stride=1),
+        #     nn.ReLU(),
+        #     Flatten(),
+        #     linear(
+        #         7 * 7 * 64,
+        #         256),
+        #     nn.ReLU(),
+        #     linear(
+        #         256,
+        #         448),
+        #     nn.ReLU()
+        # )
+
+        # self.actor = nn.Sequential(
+        #     linear(448, 448),
+        #     nn.ReLU(),
+        #     linear(448, output_size)
+        # )
+
+        # self.extra_layer = nn.Sequential(
+        #     linear(448, 448),
+        #     nn.ReLU()
+        # )
+
+        # self.critic_ext = linear(448, 1)
+        # self.critic_int = linear(448, 1)
+
+        # for p in self.modules():
+        #     if isinstance(p, nn.Conv2d):
+        #         init.orthogonal_(p.weight, np.sqrt(2))
+        #         p.bias.data.zero_()
+
+        #     if isinstance(p, nn.Linear):
+        #         init.orthogonal_(p.weight, np.sqrt(2))
+        #         p.bias.data.zero_()
+
+        # init.orthogonal_(self.critic_ext.weight, 0.01)
+        # self.critic_ext.bias.data.zero_()
+
+        # init.orthogonal_(self.critic_int.weight, 0.01)
+        # self.critic_int.bias.data.zero_()
+
+        # for i in range(len(self.actor)):
+        #     if type(self.actor[i]) == nn.Linear:
+        #         init.orthogonal_(self.actor[i].weight, 0.01)
+        #         self.actor[i].bias.data.zero_()
+
+        # for i in range(len(self.extra_layer)):
+        #     if type(self.extra_layer[i]) == nn.Linear:
+        #         init.orthogonal_(self.extra_layer[i].weight, 0.1)
+        #         self.extra_layer[i].bias.data.zero_()
+
         self.feature = nn.Sequential(
             nn.Conv2d(
                 in_channels=4, # TODO: this equals StateStackSize
-                out_channels=32,
-                kernel_size=8,
-                stride=4),
-            nn.ReLU(),
-            nn.Conv2d(
-                in_channels=32,
-                out_channels=64,
-                kernel_size=4,
+                out_channels=8,
+                kernel_size=7,
                 stride=2),
             nn.ReLU(),
             nn.Conv2d(
-                in_channels=64,
-                out_channels=64,
+                in_channels=8,
+                out_channels=8,
+                kernel_size=5,
+                stride=2),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=8,
+                out_channels=8,
                 kernel_size=3,
                 stride=1),
             nn.ReLU(),
             Flatten(),
             linear(
-                7 * 7 * 64,
-                256),
+                # 7 * 7 * 64, #TOOD: ?
+                # 23104 // 2,
+                # 200,
+                2048,
+                64),
             nn.ReLU(),
             linear(
-                256,
-                448),
+                64,
+                32),
             nn.ReLU()
         )
 
         self.actor = nn.Sequential(
-            linear(448, 448),
+            linear(32, 32),
             nn.ReLU(),
-            linear(448, output_size)
+            linear(32, output_size)
         )
 
         self.extra_layer = nn.Sequential(
-            linear(448, 448),
+            linear(32, 32),
             nn.ReLU()
         )
 
-        self.critic_ext = linear(448, 1)
-        self.critic_int = linear(448, 1)
-
-        for p in self.modules():
-            if isinstance(p, nn.Conv2d):
-                init.orthogonal_(p.weight, np.sqrt(2))
-                p.bias.data.zero_()
-
-            if isinstance(p, nn.Linear):
-                init.orthogonal_(p.weight, np.sqrt(2))
-                p.bias.data.zero_()
-
-        init.orthogonal_(self.critic_ext.weight, 0.01)
-        self.critic_ext.bias.data.zero_()
-
-        init.orthogonal_(self.critic_int.weight, 0.01)
-        self.critic_int.bias.data.zero_()
-
-        for i in range(len(self.actor)):
-            if type(self.actor[i]) == nn.Linear:
-                init.orthogonal_(self.actor[i].weight, 0.01)
-                self.actor[i].bias.data.zero_()
-
-        for i in range(len(self.extra_layer)):
-            if type(self.extra_layer[i]) == nn.Linear:
-                init.orthogonal_(self.extra_layer[i].weight, 0.1)
-                self.extra_layer[i].bias.data.zero_()
+        self.critic_ext = linear(32, 1)
+        self.critic_int = linear(32, 1)
+        
 
     def forward(self, state):
         x = self.feature(state)
