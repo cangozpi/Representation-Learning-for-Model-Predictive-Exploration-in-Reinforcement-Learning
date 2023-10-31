@@ -18,6 +18,7 @@ def get_args():
     parser.add_argument("--load_model_path", type=str, default='./checkpoints/ckpt00.ckpt', help="if \'load_model\' is set to True in the config file, then the corresponding model (agent) will be loaded from the path specified by the value of this argument.")
     parser.add_argument("--save_model_path", type=str, default='./checkpoints/ckpt00.ckpt', help="Checkpoints will be saved during the model (agent) training to the path specified by this argument.")
     parser.add_argument("--config_options", type=bool, default=False, const=True, nargs='?', help="Prints explanations of available parameters in config.conf files (see \'--config-path\').")
+    parser.add_argument("--pytorch_profiling", type=bool, default=False, const=True, nargs='?', help="Uses pytorch profiler and saves the logs at 'logs/torch_profiler_logs' directory.")
 
     args = vars(parser.parse_args())
     assert args['train'] != args['eval'], "cannot supply both \'--train\' and \'--eval\' options at the same time."

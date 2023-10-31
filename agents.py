@@ -14,6 +14,10 @@ from config import default_config
 
 from torch import nn
 
+import torch.profiler
+from torch.profiler import ProfilerActivity
+from config import args
+
 
 class RNDAgent(nn.Module):
     def __init__(
@@ -38,6 +42,8 @@ class RNDAgent(nn.Module):
             device = None,
             logger:Logger=None):
         super().__init__()
+        self.use_pytorch_profiler = args['pytorch_profiling'] # flag that indicates if pytorch profiler will be used to profile
+
         self.model = CnnActorCriticNetwork(input_size, output_size, use_noisy_net)
         self.num_env = num_env
         self.output_size = output_size
@@ -53,6 +59,7 @@ class RNDAgent(nn.Module):
         self.max_grad_norm = max_grad_norm
         self.update_proportion = update_proportion
         # self.device = torch.device('cuda' if use_cuda else 'cpu')
+        self.use_cuda = use_cuda
         if use_cuda:
             self.device = device
         else:
@@ -177,6 +184,22 @@ class RNDAgent(nn.Module):
         return extracted_feature_embeddings
 
     def train_model(self, states, target_ext, target_int, y, adv, normalized_extracted_feature_embeddings, old_policy, global_update):
+        # torch profiler
+        if self.use_pytorch_profiler == True:
+            torch_profiler_log_path = './logs/torch_profiler_logs/trainModel_prof.log'
+            self.logger.log_msg_to_both_console_and_file(f'Profiling agent.train_model() in agents.py using the torch profiler. Logs saved to: {torch_profiler_log_path}', only_rank_0=True)
+            prof = torch.profiler.profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA] if self.use_cuda else [ProfilerActivity.CPU],
+                schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(torch_profiler_log_path),
+                record_shapes=True,
+                profile_memory=True,
+                with_stack=True
+                )
+            prof.start()
+
+
+
         sample_range = np.arange(len(states))
         forward_mse = nn.MSELoss(reduction='none')
 
@@ -390,3 +413,10 @@ class RNDAgent(nn.Module):
                     self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
                     if self.representation_model is not None:
                         self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)
+                
+                if self.use_pytorch_profiler == True:
+                    prof.step()
+        
+        if self.use_pytorch_profiler == True:
+            prof.stop()
+            self.use_pytorch_profiler = False # turn off profiling once profiling is done to prevent profiling the same parts of the code more than once
