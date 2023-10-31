@@ -76,7 +76,7 @@ class RNDAgent(nn.Module):
             BYOL_projection_size = int(default_config['BYOL_projectionSize'])
             BYOL_moving_average_decay = float(default_config['BYOL_movingAverageDecay'])
             apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
-            self.representation_model = BYOL(backbone_model, in_features=448, projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
+            self.representation_model = BYOL(backbone_model, in_features=extracted_feature_embedding_dim, projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Augment(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BYOL_representationLossCoef'])
         # --------------------------------------------------------------------------------
@@ -90,7 +90,7 @@ class RNDAgent(nn.Module):
             projection_sizes = json.loads(default_config['BarlowTwinsProjectionSizes'])
             BarlowTwinsLambda = float(default_config['BarlowTwinsLambda'])
             apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
-            self.representation_model = BarlowTwins(backbone_model, in_features=448, projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
+            self.representation_model = BarlowTwins(backbone_model, in_features=extracted_feature_embedding_dim, projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Transform(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
