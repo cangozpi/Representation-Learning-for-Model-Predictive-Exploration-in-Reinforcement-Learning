@@ -23,7 +23,8 @@ test:
 	torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --eval --config_path=./configs/demo_config.conf --log_name=demo_test_00 --load_model_path=checkpoints/demo_00.ckpt
 
 kill:
-	killall python3
+	kill -9 $(shell pidof python);
+	kill -9 $(shell pidof python3)
 
 start_tensorboard:
 	tensorboard --logdir logs/tb_logs
