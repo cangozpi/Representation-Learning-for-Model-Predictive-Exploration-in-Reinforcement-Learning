@@ -14,6 +14,11 @@ import datetime
 from os import path
 from matplotlib import pyplot as plt
 
+import torch.profiler
+from torch.profiler import ProfilerActivity
+from dist_utils import distributed_cleanup
+
+
 # train_method = default_config['TrainMethod']
 # if default_config['TrainMethod'] in ['PPO', 'ICM', 'RND']:
 #     num_step = int(ppo_config['NumStep'])
@@ -215,7 +220,12 @@ class Logger:
 
             self.tb_global_steps = defaultdict(init_tb_global_step)
         
-        self.GLOBAL_RANK = None
+        self.use_pytorch_profiler = args['pytorch_profiling'] # flag that indicates if pytorch profiler will be used to profile
+        if self.use_pytorch_profiler == True:
+            self.pytorch_profilers_dict = {}
+            self.finished_pytorch_profiler_log_paths = []
+
+        self.GLOBAL_RANK = None # set manually in train.py
         
     def log_msg_to_console(self, msg):
         """
@@ -360,6 +370,81 @@ class Logger:
                 log()
         else:
             log()
+        
+    def create_new_pytorch_profiler(self, pytorch_profiler_log_path, prof_wait, prof_warmup, prof_active, prof_repeat):
+        """
+        If pytorch profiling is used then creates and returns a new pytorch profiler whose logs can be viewed using tensorboard.
+        If not then returns None and does nothing.
+        """
+        if self.use_pytorch_profiler == False or (pytorch_profiler_log_path in self.finished_pytorch_profiler_log_paths):
+            return None
+        
+        self.log_msg_to_both_console_and_file(f'Pytorch profiler with the loggin path: {pytorch_profiler_log_path} is created.')
+        use_cuda = default_config.getboolean('UseGPU')
+        prof = torch.profiler.profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA] if use_cuda else [ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(wait=prof_wait, warmup=prof_warmup, active=prof_active, repeat=prof_repeat),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(pytorch_profiler_log_path),
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True
+            )
+        prof.start()
+        pytorch_profiler_remaining_steps = (prof_wait + prof_warmup + prof_active) * prof_repeat # number of prof.step() remaining before the log is finalized and written
+        assert pytorch_profiler_log_path not in self.pytorch_profilers_dict, f'There already exists a pytorch profiler which uses the given path: {pytorch_profiler_log_path}'
+        self.pytorch_profilers_dict[pytorch_profiler_log_path] = {
+            'profiler': prof,
+            'pytorch_profiler_remaining_steps': pytorch_profiler_remaining_steps
+            }
+    
+    from torch.distributed.elastic.multiprocessing.errors import record
+    @record
+    def step_pytorch_profiler(self, pytorch_profiler_log_path):
+        """
+        If pytorch profiling is used then, steps the corresponding profiler. Otherwise, does nothing and returns None.
+        """
+        if self.use_pytorch_profiler == False or (pytorch_profiler_log_path in self.finished_pytorch_profiler_log_paths):
+            return None
+        
+        assert pytorch_profiler_log_path in self.pytorch_profilers_dict, f'A profiler with the given path: {pytorch_profiler_log_path} does not exists'
+        
+        prof_dict = self.pytorch_profilers_dict[pytorch_profiler_log_path]
+        prof = prof_dict['profiler']
+        pytorch_profiler_remaining_steps = prof_dict['pytorch_profiler_remaining_steps']
+
+        prof.step()
+        pytorch_profiler_remaining_steps -= 1
+        self.pytorch_profilers_dict[pytorch_profiler_log_path]['pytorch_profiler_remaining_steps'] =  pytorch_profiler_remaining_steps # update remaining steps
+
+        self.log_msg_to_both_console_and_file(f'Stepped profiler with path: {pytorch_profiler_log_path}, and pytorch_profiler_remaining_steps: {pytorch_profiler_remaining_steps}')
+
+        # Check if all the profilers are done (i.e. all have pytorch_profiler_remaining_steps = 0). If so then stop the code execution since profiling is already finished.
+        self.check_pytorch_profilers_finished()
+    
+    def check_pytorch_profilers_finished(self):
+        """
+        Check if all the profilers are done (i.e. all have pytorch_profiler_remaining_steps = 0).
+        If so then stop the code execution since profiling is already finished.
+        Also, stops the finished profilers and removes them from the self.pytorch_profilers_dict during its check.
+        """
+        finished_log_paths = []
+        for pytorch_profiler_log_path, prof_dict in self.pytorch_profilers_dict.items():
+            prof = prof_dict['profiler']
+            pytorch_profiler_remaining_steps = prof_dict['pytorch_profiler_remaining_steps']
+            if pytorch_profiler_remaining_steps == 0:
+                self.log_msg_to_both_console_and_file(f'Pytorch profiling with path: {pytorch_profiler_log_path} has finished.')
+                prof.stop()
+                finished_log_paths.append(pytorch_profiler_log_path)
+
+        for path in finished_log_paths: # remove finished profilers
+            del self.pytorch_profilers_dict[path]
+            self.finished_pytorch_profiler_log_paths.append(path)
+        
+        if len(self.pytorch_profilers_dict) == 0:
+            self.log_msg_to_both_console_and_file(f'Pytorch profiling has successfully finished. Terminating the code. Ignore the errors following after this line.')
+            distributed_cleanup() # terminate distributed processes
+            exit()
+
         
 
 class ParallelizedEnvironmentRenderer:

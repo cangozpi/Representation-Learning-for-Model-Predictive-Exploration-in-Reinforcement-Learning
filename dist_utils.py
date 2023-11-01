@@ -106,3 +106,7 @@ def create_process_groups_for_training(agents_group_backend="nccl", env_workers_
     assert len(env_workers_group_per_node_global_ranks) == (LOCAL_WORLD_SIZE - 1)
 
     return agents_group, env_workers_group, agents_group_global_ranks, env_workers_group_global_ranks, env_workers_group_per_node_global_ranks
+
+
+def distributed_cleanup():
+    dist.destroy_process_group()

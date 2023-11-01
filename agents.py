@@ -16,6 +16,7 @@ from torch import nn
 
 import torch.profiler
 from torch.profiler import ProfilerActivity
+from dist_utils import get_dist_info
 from config import args
 
 
@@ -42,8 +43,6 @@ class RNDAgent(nn.Module):
             device = None,
             logger:Logger=None):
         super().__init__()
-        self.use_pytorch_profiler = args['pytorch_profiling'] # flag that indicates if pytorch profiler will be used to profile
-
         self.model = CnnActorCriticNetwork(input_size, output_size, use_noisy_net)
         self.num_env = num_env
         self.output_size = output_size
@@ -184,19 +183,9 @@ class RNDAgent(nn.Module):
         return extracted_feature_embeddings
 
     def train_model(self, states, target_ext, target_int, y, adv, normalized_extracted_feature_embeddings, old_policy, global_update):
-        # torch profiler
-        if self.use_pytorch_profiler == True:
-            torch_profiler_log_path = './logs/torch_profiler_logs/trainModel_prof.log'
-            self.logger.log_msg_to_both_console_and_file(f'Profiling agent.train_model() in agents.py using the torch profiler. Logs saved to: {torch_profiler_log_path}', only_rank_0=True)
-            prof = torch.profiler.profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA] if self.use_cuda else [ProfilerActivity.CPU],
-                schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(torch_profiler_log_path),
-                record_shapes=True,
-                profile_memory=True,
-                with_stack=True
-                )
-            prof.start()
+        _, GLOBAL_RANK, _, _ = get_dist_info()
+        pytorch_profiler_log_path = f'./logs/torch_profiler_logs/agentTrainModel_prof_rank{GLOBAL_RANK}.log'
+        self.logger.create_new_pytorch_profiler(pytorch_profiler_log_path, 1, 1, 3, 1)
 
 
 
@@ -392,31 +381,28 @@ class RNDAgent(nn.Module):
                 # EMA update BYOL target network params
                 if self.representation_lr_method == "BYOL":
                     self.representation_model.update_moving_average()
+
+
+                self.logger.step_pytorch_profiler(pytorch_profiler_log_path)
+
             
             # logging
-            if self.logger is not None:
-                self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss), only_rank_0=True)
-                self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss), only_rank_0=True)
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss), only_rank_0=True)
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext), only_rank_0=True)
-                self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss), only_rank_0=True)
-                self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
+            if self.representation_model is not None:
+                self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
+            if default_config.getboolean('verbose_logging') == True:
+                self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), only_rank_0=True)
+                if default_config.getboolean('UseGradClipping') == True:
+                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), only_rank_0=True)
+                # Log final model parameters in detail
+                self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO', only_rank_0=True)
+                self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
                 if self.representation_model is not None:
-                    self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
-                if default_config.getboolean('verbose_logging') == True:
-                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), only_rank_0=True)
-                    if default_config.getboolean('UseGradClipping') == True:
-                        self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), only_rank_0=True)
-                    # Log final model parameters in detail
-                    self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO', only_rank_0=True)
-                    self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
-                    if self.representation_model is not None:
-                        self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)
+                    self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)
                 
-                if self.use_pytorch_profiler == True:
-                    prof.step()
-        
-        if self.use_pytorch_profiler == True:
-            prof.stop()
-            self.use_pytorch_profiler = False # turn off profiling once profiling is done to prevent profiling the same parts of the code more than once

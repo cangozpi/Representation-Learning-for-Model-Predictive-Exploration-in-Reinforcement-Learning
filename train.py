@@ -50,6 +50,7 @@ def main(args):
     seed = args['seed'] + GLOBAL_RANK # set different seed to every env_worker process so that every env does not play the same game
     set_seed(seed) # Note: this will not seed the gym environment
 
+
     train_method = default_config['TrainMethod']
     representation_lr_method = str(default_config['representationLearningMethod'])
 
@@ -294,7 +295,13 @@ def main(args):
 
         if is_render:
             renderer = ParallelizedEnvironmentRenderer(num_env_workers)
+
+        # pytorch profiling:
+        pytorch_profiler_log_path = f'./logs/torch_profiler_logs/TrainingLoop_prof_rank{GLOBAL_RANK}.log'
+        logger.create_new_pytorch_profiler(pytorch_profiler_log_path, 1, 1, 3, 1)
+
         while True:
+
             total_state, total_reward, total_done, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy = \
                 [], [], [], [], [], [], [], [], []
             global_step += (num_env_workers * num_step)
@@ -483,6 +490,9 @@ def main(args):
                 logger.log_msg_to_both_console_and_file('Saved ckpt at Global Step :{}'.format(global_step))
             
             dist.barrier(group=agents_group)
+
+            logger.step_pytorch_profiler(pytorch_profiler_log_path)
+
     
         if is_render:
             renderer.close()
