@@ -184,7 +184,7 @@ class RNDAgent(nn.Module):
 
     def train_model(self, states, target_ext, target_int, y, adv, normalized_extracted_feature_embeddings, old_policy, global_update):
         _, GLOBAL_RANK, _, _ = get_dist_info()
-        pytorch_profiler_log_path = f'./logs/torch_profiler_logs/agentTrainModel_prof_rank{GLOBAL_RANK}.log'
+        pytorch_profiler_log_path = f'./logs/torch_profiler_logs/{args["log_name"]}_agentTrainModel_prof_rank{GLOBAL_RANK}.log'
         self.logger.create_new_pytorch_profiler(pytorch_profiler_log_path, 1, 1, 3, 1)
 
 

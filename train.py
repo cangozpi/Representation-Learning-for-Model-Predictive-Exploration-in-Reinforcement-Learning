@@ -297,7 +297,7 @@ def main(args):
             renderer = ParallelizedEnvironmentRenderer(num_env_workers)
 
         # pytorch profiling:
-        pytorch_profiler_log_path = f'./logs/torch_profiler_logs/TrainingLoop_prof_rank{GLOBAL_RANK}.log'
+        pytorch_profiler_log_path = f'./logs/torch_profiler_logs/{args["log_name"]}_TrainingLoop_prof_rank{GLOBAL_RANK}.log'
         logger.create_new_pytorch_profiler(pytorch_profiler_log_path, 1, 1, 3, 1)
 
         while True:
@@ -491,7 +491,8 @@ def main(args):
             
             dist.barrier(group=agents_group)
 
-            logger.step_pytorch_profiler(pytorch_profiler_log_path)
+            logger.step_pytorch_profiler(pytorch_profiler_log_path) # pytorch profiler
+            logger.check_scalene_profiler_finished() # scalene profiler
 
     
         if is_render:

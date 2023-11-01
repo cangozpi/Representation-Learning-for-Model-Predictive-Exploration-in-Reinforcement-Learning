@@ -225,6 +225,8 @@ class Logger:
             self.pytorch_profilers_dict = {}
             self.finished_pytorch_profiler_log_paths = []
 
+        self.scalene_profiling_count = int(args['scalene_profiling'])
+
         self.GLOBAL_RANK = None # set manually in train.py
         
     def log_msg_to_console(self, msg):
@@ -445,7 +447,21 @@ class Logger:
             distributed_cleanup() # terminate distributed processes
             exit()
 
+    def check_scalene_profiler_finished(self):
+        """
+        Check if the scalene profiling has run for long enough and if so terminate the code.
+        if scalene profiling is off (i.e. args['scalene_profiling'] == -1), then does nothing and returns None.
+        """
+        if self.scalene_profiling_count < 0: # scalene profiling is off
+            return None
         
+        self.scalene_profiling_count -= 1
+        self.log_msg_to_both_console_and_file(f'Scalene profiling has gone through an iteration and has {self.scalene_profiling_count} many iterations left before terminating the code.')
+
+        if self.scalene_profiling_count == 0: # scalene profiling has finished
+            self.log_msg_to_both_console_and_file(f'Scalene profiling has successfully finished. Terminating the code. Ignore the errors following after this line.')
+            distributed_cleanup() # terminate distributed processes
+            exit()
 
 class ParallelizedEnvironmentRenderer:
     def __init__(self, num_envs, figsize=(6, 8)):
