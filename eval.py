@@ -184,6 +184,9 @@ def main(args):
             for param in agent.rnd.target.parameters():
                 assert param.requires_grad == False
 
+            obs_rms = load_checkpoint['obs_rms']
+            reward_rms = load_checkpoint['reward_rms']
+
             logger.log_msg_to_both_console_and_file('loading finished!', only_rank_0=True)
 
 
@@ -199,7 +202,7 @@ def main(args):
         agent.set_mode("eval")
 
 
-        state = np.zeros([num_env_workers, stateStackSize, input_size, input_size])
+        state = np.zeros([num_env_workers, stateStackSize, input_size, input_size]) # [num_env_workers, stateStackSize, input_size, input_size]
 
         NUM_LOCAL_ENV_WORKERS = LOCAL_WORLD_SIZE - 1 # number of env worker processes running on the current node
         LOCAL_ENV_WORKER_GLOBAL_RANKS = [GLOBAL_RANK + env_worker_local_rank for env_worker_local_rank in range(1, (NUM_LOCAL_ENV_WORKERS + 1))] # global ranks of the env workers which are working on the current node
@@ -224,7 +227,8 @@ def main(args):
                 dist.recv(done, src=local_env_worker_global_rank, tag=dist_tags['done'])
                 dist.recv(trun, src=local_env_worker_global_rank, tag=dist_tags['truncated'])
 
-                next_obs = torch.unsqueeze(next_state[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]), dim=0).type(torch.float)
+                # next_obs = torch.unsqueeze(next_state[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]), dim=0).type(torch.float)
+                next_obs = torch.unsqueeze(next_state, dim=0).type(torch.float) # [num_env_worker=1, stateStackSize, input_size, input_size]
 
                 if done or trun:
                     info = {'episode': {}}
@@ -240,9 +244,13 @@ def main(args):
                     episode_lengths.append(info['episode']['l'].item())
 
 
-            # total reward = int reward + ext Reward
-            with torch.no_grad():
-                intrinsic_reward = agent.compute_intrinsic_reward(next_obs)
+            # Compute normalize obs, compute intrinsic rewards and clip them (note that: total reward = int reward + ext reward)
+            with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                extracted_feature_embeddings = agent.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs=1, feature_embeddings_dim]
+                intrinsic_reward = agent.compute_intrinsic_reward(
+                    ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
+            # normalize intrinsic reward
+            intrinsic_reward /= np.sqrt(reward_rms.var)
             intrinsic_reward_list.append(intrinsic_reward.item())
 
             state = torch.unsqueeze(next_state, dim=0)
@@ -255,7 +263,8 @@ def main(args):
 
 
             if is_render:
-                renderer.render(next_obs[-num_env_workers:].numpy())
+                assert list(next_obs[-num_env_workers:, -1, :, :].unsqueeze(dim=1).shape) == [num_env_workers, 1, input_size, input_size]
+                renderer.render(next_obs[-num_env_workers:, -1, :, :].unsqueeze(dim=1).numpy()) # [num_env_workers=1, 1, input_size, input_size]
 
         if is_render:
             renderer.close()
