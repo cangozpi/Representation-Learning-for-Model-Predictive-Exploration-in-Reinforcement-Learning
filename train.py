@@ -119,6 +119,8 @@ def main(args):
     obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim)) # used for normalizing observations
     pre_obs_norm_step = int(default_config['ObsNormStep'])
     discounted_reward = RewardForwardFilter(int_gamma) # gamma used for calculating Returns for the intrinsic rewards (i.e. R_i)
+    highest_mean_total_reward = - float("inf")
+    highest_mean_undiscounted_episode_return = - float("inf")
 
     agent = RNDAgent
 
@@ -212,6 +214,8 @@ def main(args):
             global_step = load_checkpoint['global_step']
             undiscounted_episode_return = load_checkpoint['undiscounted_episode_return']
             episode_lengths = load_checkpoint['episode_lengths']
+            highest_mean_total_reward = load_checkpoint['highest_total_reward']
+            highest_mean_undiscounted_episode_return  = load_checkpoint['highest_mean_undiscounted_episode_return']
             if 'Montezuma' in env_id:
                 number_of_visited_rooms = load_checkpoint['visited_rooms']
             logger.tb_global_steps = load_checkpoint['logger.tb_global_steps']
@@ -435,17 +439,6 @@ def main(args):
             obs_rms.update(extracted_feature_embeddings)
             # -----------------------------------------------
 
-            # Step 5. Training!
-            logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | ENTERED TRAINING:')
-            # agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
-            #                 total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
-            #                 total_policy, global_update)
-            agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
-                            total_adv, ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
-                            total_policy, global_update)
-            logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | EXITTED TRAINING')
-
-
             # Logging
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (extrinsic) vs Parameter updates', np.mean(total_reward), global_update, only_rank_0=True)
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
@@ -456,8 +449,34 @@ def main(args):
                     logger.log_scalar_to_tb_with_step('data/Mean number of rooms found (over last 100 episodes) vs Parameter updates', np.mean(number_of_visited_rooms), global_update, only_rank_0=True)
 
 
+
             # Save checkpoint
-            if global_step % (num_env_workers * num_step * int(default_config["saveCkptEvery"])) == 0 and GLOBAL_RANK == 0:
+            if (
+                (global_step % (num_env_workers * num_step * int(default_config["saveCkptEvery"])) == 0) # scheduled checkpointing time
+                or
+                (highest_mean_total_reward < np.mean(total_reward)) # checkpointing the best performing agent so far for the metric total reward
+                or
+                (highest_mean_undiscounted_episode_return < np.mean(undiscounted_episode_return)) # checkpointing the best performing agent so far for the metric mean undiscounted episode return
+                ) and GLOBAL_RANK == 0:
+
+                ckpt_paths = []
+
+                if (global_step % (num_env_workers * num_step * int(default_config["saveCkptEvery"])) == 0): # scheduled checkpointing time
+                    ckpt_paths.append(save_ckpt_path)
+
+                if highest_mean_total_reward < np.mean(total_reward): # checkpointing the best performing agent so far for the metric total reward
+                    ckpt_path = ''.join([*save_ckpt_path.split('.')[:-1], "__BestModelForMeanExtrinsicRolloutRewards", '.' ,*save_ckpt_path.split('.')[-1:]])
+                    logger.log_msg_to_both_console_and_file(f'New high score for mean of rollout rewards (extrinsic): {np.mean(total_reward)}, saving checkpoint: {ckpt_path}', only_rank_0=True)
+                    highest_mean_total_reward = np.mean(total_reward)
+                    ckpt_paths.append(ckpt_path)
+                
+                if highest_mean_undiscounted_episode_return < np.mean(undiscounted_episode_return): # checkpointing the best performing agent so far for the metric mean undiscounted episode return
+                    ckpt_path = ''.join([*save_ckpt_path.split('.')[:-1], "__BestModelForMeanUndiscountedEpisodeReturn", '.' ,*save_ckpt_path.split('.')[-1:]])
+                    logger.log_msg_to_both_console_and_file(f'New high score for mean undiscounted episodic return (over last 100 episodes) (extrinsic): {np.mean(undiscounted_episode_return)}, saving checkpoint: {ckpt_path}', only_rank_0=True)
+                    highest_mean_undiscounted_episode_return = np.mean(undiscounted_episode_return)
+                    ckpt_paths.append(ckpt_path)
+
+
                 ckpt_dict = {
                     **{
                         'agent.state_dict': agent.module.state_dict()
@@ -480,14 +499,29 @@ def main(args):
                         'global_step': global_step,
                         'undiscounted_episode_return': undiscounted_episode_return,
                         'episode_lengths': episode_lengths,
+                        'highest_total_reward': highest_mean_total_reward,
+                        'highest_mean_undiscounted_episode_return': highest_mean_undiscounted_episode_return,
                     }),
                     **({'logger.tb_global_steps': logger.tb_global_steps})
                 }
                 if 'Montezuma' in env_id:
                     ckpt_dict.update(visited_rooms=number_of_visited_rooms)
-                os.makedirs('/'.join(save_ckpt_path.split('/')[:-1]), exist_ok=True)
-                torch.save(ckpt_dict, save_ckpt_path)
-                logger.log_msg_to_both_console_and_file('Saved ckpt at Global Step :{}'.format(global_step))
+                
+                for p in ckpt_paths:
+                    os.makedirs('/'.join(p.split('/')[:-1]), exist_ok=True)
+                    torch.save(ckpt_dict, p)
+                    logger.log_msg_to_both_console_and_file(f'Saved ckpt: {p} at Global Step: {global_step}')
+            
+
+            # Step 5. Training!
+            logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | ENTERED TRAINING:')
+            # agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
+            #                 total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
+            #                 total_policy, global_update)
+            agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
+                            total_adv, ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
+                            total_policy, global_update)
+            logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | EXITTED TRAINING')
             
             dist.barrier(group=agents_group)
 
