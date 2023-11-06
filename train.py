@@ -289,7 +289,10 @@ def main(args):
                 
 
                 if is_render:
-                    renderer.render(np.stack(next_obs[-num_env_workers:]))
+                    if train_method == 'original_RND':
+                        renderer.render(np.stack(next_obs[-num_env_workers:])) # [num_env, 1, input_size, input_size]
+                    elif train_method == 'modified_RND':
+                        renderer.render(np.stack(next_obs[-num_env_workers:])[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
                 if len(next_obs) % (num_step * num_env_workers) == 0:
                     next_obs = np.stack(next_obs) # modified_RND: [(num_step * num_env_workers), stateStackSize, input_size, input_size], original_RND:[(num_step * num_env_workers), 1, input_size, input_size]
                     if train_method == 'original_RND':
@@ -387,8 +390,10 @@ def main(args):
                 states = next_states[:, :, :, :] # for an explanation of why [:, :, :, :] is used refer to the discussion: https://stackoverflow.com/questions/61103275/what-is-the-difference-between-tensor-and-tensor-in-pytorch 
 
                 if is_render:
-                    renderer.render(next_obs)
-
+                    if train_method == 'original_RND':
+                        renderer.render(next_obs) # [num_env, 1, input_size, input_size]
+                    elif train_method == 'modified_RND':
+                        renderer.render(next_obs[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
 
             # calculate last next value
             _, value_ext, value_int, _ = agent.module.get_action(np.float32(states) / 255.)

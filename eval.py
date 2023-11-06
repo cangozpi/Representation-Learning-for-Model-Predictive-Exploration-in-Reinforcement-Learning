@@ -49,6 +49,8 @@ def main(args):
     seed = args['seed'] + GLOBAL_RANK # set different seed to every env_worker process so that every env does not play the same game
     set_seed(seed) # Note: this will not seed the gym environment
 
+    train_method = default_config['TrainMethod']
+    assert train_method in ['original_RND', 'modified_RND']
     representation_lr_method = str(default_config['representationLearningMethod'])
 
     env_id = default_config['EnvID']
@@ -227,8 +229,10 @@ def main(args):
                 dist.recv(done, src=local_env_worker_global_rank, tag=dist_tags['done'])
                 dist.recv(trun, src=local_env_worker_global_rank, tag=dist_tags['truncated'])
 
-                # next_obs = torch.unsqueeze(next_state[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]), dim=0).type(torch.float)
-                next_obs = torch.unsqueeze(next_state, dim=0).type(torch.float) # [num_env_worker=1, stateStackSize, input_size, input_size]
+                if train_method == 'original_RND':
+                    next_obs = torch.unsqueeze(next_state[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]), dim=0).type(torch.float) # [num_env_worker=1, 1, input_size, input_size]
+                elif train_method == 'modified_RND':
+                    next_obs = torch.unsqueeze(next_state, dim=0).type(torch.float) # [num_env_worker=1, stateStackSize, input_size, input_size]
 
                 if done or trun:
                     info = {'episode': {}}
@@ -245,10 +249,14 @@ def main(args):
 
 
             # Compute normalize obs, compute intrinsic rewards and clip them (note that: total reward = int reward + ext reward)
-            with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
-                extracted_feature_embeddings = agent.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs=1, feature_embeddings_dim]
+            if train_method == 'original_RND':
                 intrinsic_reward = agent.compute_intrinsic_reward(
-                    ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
+                    ((next_obs.cpu().numpy() - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
+            elif train_method == 'modified_RND':
+                with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                    extracted_feature_embeddings = agent.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs=1, feature_embeddings_dim]
+                    intrinsic_reward = agent.compute_intrinsic_reward(
+                        ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
             # normalize intrinsic reward
             intrinsic_reward /= np.sqrt(reward_rms.var)
             intrinsic_reward_list.append(intrinsic_reward.item())
@@ -263,8 +271,12 @@ def main(args):
 
 
             if is_render:
-                assert list(next_obs[-num_env_workers:, -1, :, :].unsqueeze(dim=1).shape) == [num_env_workers, 1, input_size, input_size]
-                renderer.render(next_obs[-num_env_workers:, -1, :, :].unsqueeze(dim=1).numpy()) # [num_env_workers=1, 1, input_size, input_size]
+                # assert list(next_obs[-num_env_workers:, -1, :, :].unsqueeze(dim=1).shape) == [num_env_workers, 1, input_size, input_size]
+                # renderer.render(next_obs[-num_env_workers:, -1, :, :].unsqueeze(dim=1).numpy()) # [num_env_workers=1, 1, input_size, input_size]
+                if train_method == 'original_RND':
+                    renderer.render(next_obs.numpy()) # [num_env, 1, input_size, input_size]
+                elif train_method == 'modified_RND':
+                    renderer.render(next_obs[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size]).numpy()) # [num_env, 1, input_size, input_size]
 
         if is_render:
             renderer.close()
