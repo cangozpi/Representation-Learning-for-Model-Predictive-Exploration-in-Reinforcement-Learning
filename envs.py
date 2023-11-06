@@ -81,9 +81,8 @@ class MaxAndSkipEnv(gym.Wrapper):
     def step(self, action):
         """Repeat action, sum reward, and max over last observations."""
         total_reward = 0.0
-        done = None
         for i in range(self._skip):
-            obs, reward, done, _, info = self.env.step(action)
+            obs, reward, done, trun, info = self.env.step(action)
             if self.is_render:
                 # custom rendering:
                 rendering_view = self.env.render()
@@ -99,13 +98,13 @@ class MaxAndSkipEnv(gym.Wrapper):
             if i == self._skip - 1:
                 self._obs_buffer[1] = obs
             total_reward += reward
-            if done:
+            if done or trun:
                 break
         # Note that the observation on the done=True frame
         # doesn't matter
         max_frame = self._obs_buffer.max(axis=0)
 
-        return max_frame, total_reward, done, _, info
+        return max_frame, total_reward, done, trun, info
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
@@ -125,7 +124,7 @@ class MaxAndSkipEnv(gym.Wrapper):
 class MaxStepPerEpisodeWrapper(gym.Wrapper):
     def __init__(self, env, max_step_per_episode):
         """
-        Let's you call env.step() max_step_per_episode many times before returning done=True, truncated=True
+        Let's you call env.step() max_step_per_episode many times before returning done=(False | True), truncated=True
         """
         super(MaxStepPerEpisodeWrapper, self).__init__(env)
         self.max_step_per_episode = max_step_per_episode
@@ -135,7 +134,7 @@ class MaxStepPerEpisodeWrapper(gym.Wrapper):
         obs, reward, done, truncated, info = self.env.step(action)
         self.steps += 1
         if self.max_step_per_episode <= self.steps:
-            done = True
+            # done = False
             truncated = True
 
         return obs, reward, done, truncated, info
@@ -225,15 +224,15 @@ class MontezumaInfoWrapper(gym.Wrapper):
         return int(ram[self.room_address])
 
     def step(self, action):
-        obs, rew, done, _, info = self.env.step(action)
+        obs, rew, done, trun, info = self.env.step(action)
         self.visited_rooms.add(self.get_current_room())
 
-        if done:
+        if done or trun:
             if 'episode' not in info:
                 info['episode'] = {}
             info['episode'].update(visited_rooms=copy(self.visited_rooms))
             self.visited_rooms.clear()
-        return obs, rew, done, _, info
+        return obs, rew, done, trun, info
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
@@ -296,11 +295,11 @@ class AtariEnvironment():
             if 'Breakout' in self.env_id:
                 action += 1
 
-            state, reward, done, _, info = self.env.step(action)
+            state, reward, done, trun, info = self.env.step(action)
 
             self.rall += reward
 
-            if done:
+            if done or trun:
                 self.recent_rlist.append(self.rall)
 
 
@@ -315,9 +314,9 @@ class AtariEnvironment():
             dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
             dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
             dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
-            dist.send(torch.tensor(_, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
 
-            if done:
+            if done or trun:
                 if 'Montezuma' in self.env_id:
                     dist.send(torch.tensor(len(info['episode']['visited_rooms']), dtype=torch.float64), dst=0, tag=self.dist_tags['number_of_visited_rooms'])
                 dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
@@ -391,7 +390,7 @@ class MarioEnvironment():
             action = torch.zeros(self.action_dim, dtype=torch.int64)
             dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
 
-            state, reward, done, _, info = self.env.step(action.item())
+            state, reward, done, trun, info = self.env.step(action.item())
 
             # reward range -15 ~ 15
             reward /= 15
@@ -399,19 +398,17 @@ class MarioEnvironment():
 
             # when Mario loses life, changes the state to the terminal
             # state.
-            force_done = _
             if self.life_done:
                 if self.lives is None:
                     self.lives = info['life']
                 elif self.lives > info['life'] and info['life'] > 0:
-                    force_done = True
                     done = True
                     self.lives = info['life']
 
 
             # r_ = int(info.get('flag_get', False)) #TODO: not sure how to use this
 
-            if done:
+            if done or trun:
                 self.recent_rlist.append(self.rall)
 
                 self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}, visited_rooms: {info.get("episode", {}).get("visited_rooms", {})}, stage: {info["stage"]}, current_x: {info["x_pos"]}, max_x: {self.max_pos}')
@@ -422,9 +419,9 @@ class MarioEnvironment():
             dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
             dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
             dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
-            dist.send(torch.tensor(_, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
 
-            if done:
+            if done or trun:
                 dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
                 dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
 
@@ -521,11 +518,11 @@ class ClassicControlEnvironment():
             dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
 
 
-            state, reward, done, _, info = self.env.step(action.numpy())
+            state, reward, done, trun, info = self.env.step(action.numpy())
 
             self.rall += reward
 
-            if done:
+            if done or trun:
                 self.recent_rlist.append(self.rall)
 
                 self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}')
@@ -536,9 +533,9 @@ class ClassicControlEnvironment():
             dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
             dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
             dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
-            dist.send(torch.tensor(_, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
 
-            if done:
+            if done or trun:
                 dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
                 dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
 
@@ -570,9 +567,9 @@ class Monitor(gym.Wrapper):
         return self.env.reset(**kwargs)
 
     def step(self, action):
-        ob, rew, done, _, info = self.env.step(action)
+        ob, rew, done, trun, info = self.env.step(action)
         self.rewards.append(rew)
-        if done:
+        if done or trun:
             eprew = sum(self.rewards)
             eplen = len(self.rewards)
             epinfo = {"undiscounted_episode_return": round(eprew, 6), "l": eplen, "t": round(time.time() - self.tstart, 6)}
@@ -583,7 +580,7 @@ class Monitor(gym.Wrapper):
                 info["episode"] = {}
             info['episode'].update(epinfo)
         self.total_steps += 1
-        return (ob, rew, done, _, info)
+        return (ob, rew, done, trun, info)
 
     def get_total_steps(self):
         return self.total_steps

@@ -218,15 +218,15 @@ def main(args):
                 dist.send(actions[idx], dst=local_env_worker_global_rank, tag=dist_tags['action'])
 
             for local_env_worker_global_rank in LOCAL_ENV_WORKER_GLOBAL_RANKS:
-                next_state, reward, done, _ = torch.zeros(stateStackSize, input_size, input_size, dtype=torch.uint8), torch.zeros(1, dtype=torch.float64), torch.zeros(1, dtype=torch.bool), torch.zeros(1, dtype=torch.bool)
+                next_state, reward, done, trun = torch.zeros(stateStackSize, input_size, input_size, dtype=torch.uint8), torch.zeros(1, dtype=torch.float64), torch.zeros(1, dtype=torch.bool), torch.zeros(1, dtype=torch.bool)
                 dist.recv(next_state, src=local_env_worker_global_rank, tag=dist_tags['state'])
                 dist.recv(reward, src=local_env_worker_global_rank, tag=dist_tags['reward'])
                 dist.recv(done, src=local_env_worker_global_rank, tag=dist_tags['done'])
-                dist.recv(_, src=local_env_worker_global_rank, tag=dist_tags['truncated'])
+                dist.recv(trun, src=local_env_worker_global_rank, tag=dist_tags['truncated'])
 
                 next_obs = torch.unsqueeze(next_state[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]), dim=0).type(torch.float)
 
-                if done:
+                if done or trun:
                     info = {'episode': {}}
                     info['episode']['undiscounted_episode_return'] = torch.zeros(1, dtype=torch.float64)
                     info['episode']['l'] = torch.zeros(1, dtype=torch.float64)

@@ -65,7 +65,12 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
     python -m scalene --- -m torch.distributed.run --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt
     ```
 
+* Profiling with Pytorch Profiler (torchrun Example):
+    ```bash
+    torchrun --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --pytorch_profiling
+    ```
 ---
+
 ### Some helper commands
 * Kill RND code (and its subprocesses):
     ```bash
