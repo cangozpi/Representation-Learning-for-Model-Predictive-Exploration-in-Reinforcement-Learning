@@ -67,7 +67,12 @@ class RNDAgent(nn.Module):
         self.logger = logger
 
         extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
-        self.rnd = RNDModel(input_size=extracted_feature_embedding_dim, output_size=512)
+        self.train_method = default_config['TrainMethod']
+        assert self.train_method in ['original_RND', 'modified_RND']
+        if self.train_method == 'original_RND':
+            self.rnd = RNDModel(input_size=input_size, output_size=512, train_method=self.train_method)
+        elif self.train_method == 'modified_RND':
+            self.rnd = RNDModel(input_size=extracted_feature_embedding_dim, output_size=512, train_method=self.train_method)
         
         assert representation_lr_method in ['None', "BYOL", "Barlow-Twins"]
         self.representation_lr_method = representation_lr_method

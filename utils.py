@@ -67,18 +67,23 @@ class RunningMeanStd(object):
         self.var = np.ones(shape, 'float64')
         self.count = epsilon
 
-    def update(self, x):
-        # note that x is of shape [B=(num_step * num_env_workers), extracted_feature_embeddings_dim]
-        batch_mean = np.mean(x, axis=0, keepdims=True) # [1, extracted_feature_embeddings_dim]
-        batch_var = np.var(x, axis=0, keepdims=True) # [1, extracted_feature_embeddings_dim]
-        batch_count = x.shape[0] # = num_step * num_env_workers
+        self.train_method = default_config['TrainMethod']
+        assert self.train_method in ['original_RND', 'modified_RND']
 
+    def update(self, x):
         # --
-        # Below is the old code used for normalizing image observations. Kept for reference:
-        # note that x is of shape [B=(num_step * num_env_workers), stateStackSize, input_size, input_size]
-        # batch_mean = np.mean(x, axis=0) # [stateStackSize, input_size, input_size]
-        # batch_var = np.var(x, axis=0) # [stateStackSize, input_size, input_size]
-        # batch_count = x.shape[0] # = num_step * num_env_workers
+        if self.train_method == 'original_RND':
+        # Below is the old code used for normalizing image observations:
+        # note that x is of shape [B=(num_step * num_env_workers), 1, input_size, input_size]
+            batch_mean = np.mean(x, axis=0) # [1, input_size, input_size]
+            batch_var = np.var(x, axis=0) # [1, input_size, input_size]
+            batch_count = x.shape[0] # = num_step * num_env_workers
+
+        elif self.train_method == 'modified_RND':
+            # note that x is of shape [B=(num_step * num_env_workers), extracted_feature_embeddings_dim]
+            batch_mean = np.mean(x, axis=0, keepdims=True) # [1, extracted_feature_embeddings_dim]
+            batch_var = np.var(x, axis=0, keepdims=True) # [1, extracted_feature_embeddings_dim]
+            batch_count = x.shape[0] # = num_step * num_env_workers
         # --
 
         self.update_from_moments(batch_mean, batch_var, batch_count)

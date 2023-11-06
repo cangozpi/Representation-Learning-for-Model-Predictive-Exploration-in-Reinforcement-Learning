@@ -52,6 +52,7 @@ def main(args):
 
 
     train_method = default_config['TrainMethod']
+    assert train_method in ['original_RND', 'modified_RND']
     representation_lr_method = str(default_config['representationLearningMethod'])
 
     env_id = default_config['EnvID']
@@ -114,9 +115,11 @@ def main(args):
     life_done = default_config.getboolean('LifeDone')
 
     reward_rms = RunningMeanStd() # used for normalizing intrinsic rewards
-    # obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size)) # used for normalizing observations
-    extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
-    obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim)) # used for normalizing observations
+    if train_method == 'original_RND':
+        obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size)) # used for normalizing observations
+    elif train_method == 'modified_RND':
+        extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
+        obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim)) # used for normalizing observations
     pre_obs_norm_step = int(default_config['ObsNormStep'])
     discounted_reward = RewardForwardFilter(int_gamma) # gamma used for calculating Returns for the intrinsic rewards (i.e. R_i)
     highest_mean_total_reward = - float("inf")
@@ -279,18 +282,22 @@ def main(args):
                         dist.recv(info['episode']['undiscounted_episode_return'], src=local_env_worker_global_rank, tag=dist_tags['undiscounted_episode_return'])
                         dist.recv(info['episode']['l'], src=local_env_worker_global_rank, tag=dist_tags['episode_length'])
 
-                    # next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]))
-                    next_obs.append(s) # [stateStackSize, input_size, input_size]
+                    if train_method == 'original_RND':
+                        next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size])) # [1, input_size, input_size]
+                    elif train_method == 'modified_RND':
+                        next_obs.append(s) # [stateStackSize, input_size, input_size]
                 
 
                 if is_render:
                     renderer.render(np.stack(next_obs[-num_env_workers:]))
                 if len(next_obs) % (num_step * num_env_workers) == 0:
-                    next_obs = np.stack(next_obs) # [(num_step * num_env_workers), stateStackSize, input_size, input_size]
-                    with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
-                        extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
-                    obs_rms.update(extracted_feature_embeddings)
-                    # obs_rms.update(next_obs)
+                    next_obs = np.stack(next_obs) # modified_RND: [(num_step * num_env_workers), stateStackSize, input_size, input_size], original_RND:[(num_step * num_env_workers), 1, input_size, input_size]
+                    if train_method == 'original_RND':
+                        obs_rms.update(next_obs)
+                    elif train_method == 'modified_RND':
+                        with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                            extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
+                        obs_rms.update(extracted_feature_embeddings)
                     next_obs = []
             if is_render:
                 renderer.close()
@@ -331,8 +338,10 @@ def main(args):
                     next_states.append(s)
                     rewards.append(r)
                     dones.append(d) # --> [num_env]
-                    # next_obs.append(s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]))
-                    next_obs.append(s) # [stateStackSize, input_size, input_size]
+                    if train_method == 'original_RND':
+                        next_obs.append(s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size])) # [1, input_size, input_size]
+                    elif train_method == 'modified_RND':
+                        next_obs.append(s) # [stateStackSize, input_size, input_size]
 
                     if d or trun:
                         info = {'episode': {}}
@@ -351,20 +360,21 @@ def main(args):
                 next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
                 rewards = np.hstack(rewards) # -> [num_env, ]
                 dones = np.hstack(dones) # -> [num_env, ]
-                # next_obs = np.stack(next_obs) # -> [num_env, 1, H, W]
-                next_obs = np.stack(next_obs) # -> [num_env, stateStackSize, H, W]
+                next_obs = np.stack(next_obs) # -> modified_RND: [num_env, stateStackSize, H, W], original_RND: [num_env, 1, H, W]
 
                 # Compute normalize obs, compute intrinsic rewards and clip them (note that: total reward = int reward + ext reward)
-                with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
-                    extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs, feature_embeddings_dim]
+                if train_method == 'original_RND':
                     intrinsic_reward = agent.module.compute_intrinsic_reward(
-                        ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
+                        ((next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
+                elif train_method == 'modified_RND':
+                    with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                        extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs, feature_embeddings_dim]
+                        intrinsic_reward = agent.module.compute_intrinsic_reward(
+                            ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
 
-                # intrinsic_reward = agent.module.compute_intrinsic_reward(
-                #     ((next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
                 intrinsic_reward = np.hstack(intrinsic_reward) # [num_env,]
 
-                total_next_obs.append(next_obs) # --> [num_step, num_env, state_stack_size, H, W]
+                total_next_obs.append(next_obs) # --> modified_RND: [num_step, num_env, state_stack_size, H, W], original_RND: [num_step, num_env, 1, H, W]
                 total_int_reward.append(intrinsic_reward)
                 total_state.append(states)
                 total_reward.append(rewards)
@@ -390,8 +400,10 @@ def main(args):
             total_reward = np.stack(total_reward).transpose().clip(-1, 1) # --> [num_env, num_step]
             total_action = np.stack(total_action).transpose().reshape([-1]) # --> [num_env * num_step]
             total_done = np.stack(total_done).transpose() # --> [num_env, num_step]
-            # total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, 1, input_size, input_size]) # --> [num_env * num_step, 1, H, W]
-            total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
+            if train_method == 'original_RND':
+                total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, 1, input_size, input_size]) # --> [num_env * num_step, 1, H, W]
+            elif train_method == 'modified_RND':
+                total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
             total_ext_values = np.stack(total_ext_values).transpose() # --> [num_env, (num_step + 1)]
             total_int_values = np.stack(total_int_values).transpose() # --> [num_env, (num_step + 1)]
 
@@ -431,12 +443,13 @@ def main(args):
             # -----------------------------------------------
 
             # Step 4. update obs normalize param
-            # obs_rms.update(total_next_obs)
-
-            # next_obs = np.stack(next_obs) # [(num_step * num_env_workers), stateStackSize, input_size, input_size]
-            with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
-                extracted_feature_embeddings = agent.module.extract_feature_embeddings(total_next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
-            obs_rms.update(extracted_feature_embeddings)
+            if train_method == 'original_RND':
+                obs_rms.update(total_next_obs)
+            elif train_method == 'modified_RND':
+                # next_obs = np.stack(next_obs) # [(num_step * num_env_workers), stateStackSize, input_size, input_size]
+                with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                    extracted_feature_embeddings = agent.module.extract_feature_embeddings(total_next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
+                obs_rms.update(extracted_feature_embeddings)
             # -----------------------------------------------
 
             # Logging
@@ -515,12 +528,14 @@ def main(args):
 
             # Step 5. Training!
             logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | ENTERED TRAINING:')
-            # agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
-            #                 total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
-            #                 total_policy, global_update)
-            agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
-                            total_adv, ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
-                            total_policy, global_update)
+            if train_method == 'original_RND':
+                agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
+                                total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
+                                total_policy, global_update)
+            elif train_method == 'modified_RND':
+                agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
+                                total_adv, ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
+                                total_policy, global_update)
             logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | EXITTED TRAINING')
             
             dist.barrier(group=agents_group)
