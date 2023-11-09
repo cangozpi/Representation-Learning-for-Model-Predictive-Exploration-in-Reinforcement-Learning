@@ -68,7 +68,8 @@ class RNDAgent(nn.Module):
 
         extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
         self.train_method = default_config['TrainMethod']
-        assert self.train_method in ['original_RND', 'modified_RND']
+        assert self.train_method in ['PPO', 'original_RND', 'modified_RND']
+        self.rnd = None
         if self.train_method == 'original_RND':
             self.rnd = RNDModel(input_size=input_size, output_size=512, train_method=self.train_method)
         elif self.train_method == 'modified_RND':
@@ -108,27 +109,31 @@ class RNDAgent(nn.Module):
 
         self.optimizer = optim.Adam(self.get_agent_parameters(), lr=learning_rate)
 
-        self.rnd = self.rnd.to(self.device)
         self.model = self.model.to(self.device)
+        if self.rnd is not None:
+            self.rnd = self.rnd.to(self.device)
         if self.representation_model is not None:
             self.representation_model = self.representation_model.to(self.device)
     
     def get_agent_parameters(self):
         """
         Gathers the parameters (nn.Module parameters) of the RNDAgent and returns the unique ones 
-        (without repetation of the shared parameters btw different models/modules).
+        (without repetition of the shared parameters btw different models/modules).
         In other words returns parameters from PPO Agent, RND, and Representation Model (i.e. BYOL, Barlow-Twins).
         """
-        if self.representation_model is not None:
-            agent_params =  set(list(self.model.parameters()) + list(self.rnd.predictor.parameters()) + list(self.representation_model.get_trainable_parameters()))
-        else:
-            agent_params = set(set(list(self.model.parameters()) + list(self.rnd.predictor.parameters())))
+        agent_params = list(self.model.parameters()) # PPO params
+        if self.rnd is not None: # RND params
+            agent_params = [*agent_params, *list(self.rnd.predictor.parameters())]
+        if self.representation_model is not None: # representation model params (i.e. BYOL | Barlow-Twins)
+            agent_params = [*agent_params, *list(self.representation_model.get_trainable_parameters())]
+        agent_params = set(agent_params)
         
         # double checking
         for p in self.model.parameters():
             assert p in agent_params
-        for p in self.rnd.predictor.parameters():
-            assert p in agent_params
+        if self.rnd is not None:
+            for p in self.rnd.predictor.parameters():
+                assert p in agent_params
         if self.representation_model is not None:
             for p in self.representation_model.get_trainable_parameters():
                 assert p in agent_params
@@ -143,12 +148,14 @@ class RNDAgent(nn.Module):
         assert mode in ["train", "eval"]
         if mode == "train":
             self.model = self.model.train()
-            self.rnd = self.rnd.train()
+            if self.rnd is not None:
+                self.rnd = self.rnd.train()
             if self.representation_model is not None:
                 self.representation_model = self.representation_model.train()
         elif mode == "eval":
             self.model = self.model.eval()
-            self.rnd = self.rnd.eval()
+            if self.rnd is not None:
+                self.rnd = self.rnd.eval()
             if self.representation_model is not None:
                 self.representation_model = self.representation_model.eval()
         else:
@@ -170,6 +177,7 @@ class RNDAgent(nn.Module):
         return (p.cumsum(axis=axis) > r).argmax(axis=axis)
 
     def compute_intrinsic_reward(self, next_obs):
+        assert (self.rnd is not None) and (self.train_method != 'PPO'), 'RND cannot be used when using "TrainMethod" = "PPO"'
         next_obs = torch.FloatTensor(next_obs).to(self.device)
 
         target_next_feature = self.rnd.target(next_obs)
@@ -213,26 +221,31 @@ class RNDAgent(nn.Module):
                 # Perform batching and sending to GPU:
                 s_batch = torch.FloatTensor(states)[batch_indices].to(self.device)
                 target_ext_batch = torch.FloatTensor(target_ext)[batch_indices].to(self.device)
-                target_int_batch = torch.FloatTensor(target_int)[batch_indices].to(self.device)
+                if self.train_method in ['original_RND', 'modified_RND']:
+                    target_int_batch = torch.FloatTensor(target_int)[batch_indices].to(self.device)
                 y_batch = torch.LongTensor(y)[batch_indices].to(self.device)
                 adv_batch = torch.FloatTensor(adv)[batch_indices].to(self.device)
-                normalized_extracted_feature_embeddings_batch = torch.FloatTensor(normalized_extracted_feature_embeddings)[batch_indices].to(self.device)
+                if self.train_method in ['original_RND', 'modified_RND']:
+                    normalized_extracted_feature_embeddings_batch = torch.FloatTensor(normalized_extracted_feature_embeddings)[batch_indices].to(self.device)
                 with torch.no_grad():
                     policy_old_list = torch.stack(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[batch_indices].to(self.device)
                     m_old = Categorical(F.softmax(policy_old_list, dim=-1))
                     log_prob_old = m_old.log_prob(y_batch)
 
 
+
+                rnd_loss = 0
                 # --------------------------------------------------------------------------------
                 # for Curiosity-driven(Random Network Distillation)
-                # Note that gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
-                predict_next_state_feature, target_next_state_feature = self.rnd(normalized_extracted_feature_embeddings_batch)
+                if self.rnd is not None:
+                    # Note that gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                    predict_next_state_feature, target_next_state_feature = self.rnd(normalized_extracted_feature_embeddings_batch)
 
-                rnd_loss = forward_mse(predict_next_state_feature, target_next_state_feature.detach()).mean(-1)
-                # Proportion of exp used for predictor update
-                mask = torch.rand(len(rnd_loss)).to(self.device)
-                mask = (mask < self.update_proportion).type(torch.FloatTensor).to(self.device)
-                rnd_loss = (rnd_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
+                    rnd_loss = forward_mse(predict_next_state_feature, target_next_state_feature.detach()).mean(-1)
+                    # Proportion of exp used for predictor update
+                    mask = torch.rand(len(rnd_loss)).to(self.device)
+                    mask = (mask < self.update_proportion).type(torch.FloatTensor).to(self.device)
+                    rnd_loss = (rnd_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
                 # ---------------------------------------------------------------------------------
 
 
@@ -344,8 +357,11 @@ class RNDAgent(nn.Module):
                     1.0 + self.ppo_eps) * adv_batch
 
                 actor_loss = -torch.min(surr1, surr2).mean()
+
                 critic_ext_loss = F.mse_loss(value_ext.sum(1), target_ext_batch)
-                critic_int_loss = F.mse_loss(value_int.sum(1), target_int_batch)
+                critic_int_loss = 0
+                if self.rnd is not None:
+                    critic_int_loss = F.mse_loss(value_int.sum(1), target_int_batch)
 
                 critic_loss = critic_ext_loss + critic_int_loss
 
@@ -363,7 +379,8 @@ class RNDAgent(nn.Module):
                 # Log final model grads in detail
                 if i == self.epoch - 1 and default_config.getboolean('verbose_logging') == True:
                     self.logger.log_gradients_in_model_to_tb_without_step(self.model,'PPO', log_full_detail=True, only_rank_0=True)
-                    self.logger.log_gradients_in_model_to_tb_without_step(self.rnd, 'RND', log_full_detail=True, only_rank_0=True)
+                    if self.rnd is not None:
+                        self.logger.log_gradients_in_model_to_tb_without_step(self.rnd, 'RND', log_full_detail=True, only_rank_0=True)
                     if self.representation_model is not None:
                         self.logger.log_gradients_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', log_full_detail=True, only_rank_0=True)
 
@@ -373,10 +390,12 @@ class RNDAgent(nn.Module):
                 total_loss.append(loss.detach().cpu().item())
                 total_actor_loss.append(actor_loss.detach().cpu().item())
                 total_critic_loss.append(0.5 * critic_loss.detach().cpu().item())
-                total_critic_loss_int.append(0.5 * critic_int_loss.detach().cpu().item())
+                if self.rnd is not None:
+                    total_critic_loss_int.append(0.5 * critic_int_loss.detach().cpu().item())
                 total_critic_loss_ext.append(0.5 * critic_ext_loss.detach().cpu().item())
                 total_entropy_loss.append(- self.ent_coef * entropy.detach().cpu().item())
-                total_rnd_loss.append(rnd_loss.detach().cpu().item())
+                if self.rnd is not None:
+                    total_rnd_loss.append(rnd_loss.detach().cpu().item())
                 if self.representation_model is not None:
                     total_representation_loss.append(self.representation_loss_coef * representation_loss.detach().cpu().item())
                 total_grad_norm_unclipped.append(grad_norm_unclipped)
@@ -395,10 +414,12 @@ class RNDAgent(nn.Module):
             self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss), only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
+            if self.rnd is not None:
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss), only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
+            if self.rnd is not None:
+                self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
             if self.representation_model is not None:
                 self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
             if default_config.getboolean('verbose_logging') == True:
@@ -407,7 +428,8 @@ class RNDAgent(nn.Module):
                     self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), only_rank_0=True)
                 # Log final model parameters in detail
                 self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO', only_rank_0=True)
-                self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
+                if self.rnd is not None:
+                    self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
                 if self.representation_model is not None:
                     self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)
                 

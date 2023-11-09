@@ -62,17 +62,20 @@ def make_train_data(reward, done, value, gamma, num_step, num_worker):
 
 class RunningMeanStd(object):
     # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
-    def __init__(self, epsilon=1e-4, shape=()):
+    def __init__(self, epsilon=1e-4, shape=(), usage=''):
+        assert usage in ['reward_rms', 'obs_rms'], "Invalid usage param passed to RunningMeanStd"
+        self.usage = usage
         self.mean = np.zeros(shape, 'float64')
         self.var = np.ones(shape, 'float64')
         self.count = epsilon
 
         self.train_method = default_config['TrainMethod']
-        assert self.train_method in ['original_RND', 'modified_RND']
+        if self.usage == 'obs_rms':
+            assert self.train_method in ['original_RND', 'modified_RND']
 
     def update(self, x):
         # --
-        if self.train_method == 'original_RND':
+        if (self.train_method == 'original_RND') or (self.usage == 'reward_rms'):
         # Below is the old code used for normalizing image observations:
         # note that x is of shape [B=(num_step * num_env_workers), 1, input_size, input_size]
             batch_mean = np.mean(x, axis=0) # [1, input_size, input_size]

@@ -50,7 +50,7 @@ def main(args):
     set_seed(seed) # Note: this will not seed the gym environment
 
     train_method = default_config['TrainMethod']
-    assert train_method in ['original_RND', 'modified_RND']
+    assert train_method in ['PPO', 'original_RND', 'modified_RND']
     representation_lr_method = str(default_config['representationLearningMethod'])
 
     env_id = default_config['EnvID']
@@ -183,8 +183,9 @@ def main(args):
                     assert agent.representation_model.backbone is agent.model.feature
 
 
-            for param in agent.rnd.target.parameters():
-                assert param.requires_grad == False
+            if train_method in ['original_RND', 'modified_RND']:
+                for param in agent.rnd.target.parameters():
+                    assert param.requires_grad == False
 
             obs_rms = load_checkpoint['obs_rms']
             reward_rms = load_checkpoint['reward_rms']
@@ -193,7 +194,7 @@ def main(args):
 
 
         agent_PPO_total_params = sum(p.numel() for p in agent.model.parameters())
-        agent_RND_predictor_total_params = sum(p.numel() for p in agent.rnd.predictor.parameters())
+        agent_RND_predictor_total_params = sum(p.numel() for p in agent.rnd.predictor.parameters()) if agent.rnd is not None else 0
         agent_representation_model_total_params = sum(p.numel() for p in agent.representation_model.parameters()) if agent.representation_model is not None else 0
         logger.log_msg_to_both_console_and_file(f"{'*'*20}\
             \nNumber of PPO parameters: {agent_PPO_total_params}\
@@ -233,6 +234,8 @@ def main(args):
                     next_obs = torch.unsqueeze(next_state[(stateStackSize - 1), :, :].reshape([1, input_size, input_size]), dim=0).type(torch.float) # [num_env_worker=1, 1, input_size, input_size]
                 elif train_method == 'modified_RND':
                     next_obs = torch.unsqueeze(next_state, dim=0).type(torch.float) # [num_env_worker=1, stateStackSize, input_size, input_size]
+                elif (train_method == 'PPO') and is_render: # next_obs is just used for rendering purposes
+                    next_obs = torch.unsqueeze(next_state, dim=0).type(torch.float) # [num_env_worker=1, stateStackSize, input_size, input_size]
 
                 if done or trun:
                     info = {'episode': {}}
@@ -258,8 +261,9 @@ def main(args):
                     intrinsic_reward = agent.compute_intrinsic_reward(
                         ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
             # normalize intrinsic reward
-            intrinsic_reward /= np.sqrt(reward_rms.var)
-            intrinsic_reward_list.append(intrinsic_reward.item())
+            if train_method in ['original_RND', 'modified_RND']:
+                intrinsic_reward /= np.sqrt(reward_rms.var)
+                intrinsic_reward_list.append(intrinsic_reward.item())
 
             state = torch.unsqueeze(next_state, dim=0)
                 
@@ -276,6 +280,8 @@ def main(args):
                 if train_method == 'original_RND':
                     renderer.render(next_obs.numpy()) # [num_env, 1, input_size, input_size]
                 elif train_method == 'modified_RND':
+                    renderer.render(next_obs[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size]).numpy()) # [num_env, 1, input_size, input_size]
+                elif train_method == 'PPO':
                     renderer.render(next_obs[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size]).numpy()) # [num_env, 1, input_size, input_size]
 
         if is_render:

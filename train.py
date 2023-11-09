@@ -52,7 +52,7 @@ def main(args):
 
 
     train_method = default_config['TrainMethod']
-    assert train_method in ['original_RND', 'modified_RND']
+    assert train_method in ['PPO', 'original_RND', 'modified_RND']
     representation_lr_method = str(default_config['representationLearningMethod'])
 
     env_id = default_config['EnvID']
@@ -114,12 +114,14 @@ def main(args):
     action_prob = float(default_config['ActionProb'])
     life_done = default_config.getboolean('LifeDone')
 
-    reward_rms = RunningMeanStd() # used for normalizing intrinsic rewards
+    reward_rms = RunningMeanStd(usage='reward_rms') # used for normalizing intrinsic rewards
     if train_method == 'original_RND':
-        obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size)) # used for normalizing observations
+        obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size), usage='obs_rms') # used for normalizing observations
     elif train_method == 'modified_RND':
         extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
-        obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim)) # used for normalizing observations
+        obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim), usage='obs_rms') # used for normalizing observations
+    elif train_method == 'PPO':
+        obs_rms = None
     pre_obs_norm_step = int(default_config['ObsNormStep'])
     discounted_reward = RewardForwardFilter(int_gamma) # gamma used for calculating Returns for the intrinsic rewards (i.e. R_i)
     highest_mean_total_reward = - float("inf")
@@ -207,8 +209,9 @@ def main(args):
                 # agent.optimizer.load_state_dict(load_checkpoint['agent.optimizer.state_dict'])
             
             
-            for param in agent.rnd.target.parameters():
-                assert param.requires_grad == False
+            if train_method in ['original_RND', 'modified_RND']:
+                for param in agent.rnd.target.parameters():
+                    assert param.requires_grad == False
 
             obs_rms = load_checkpoint['obs_rms']
             reward_rms = load_checkpoint['reward_rms']
@@ -237,7 +240,7 @@ def main(args):
 
     
         agent_PPO_total_params = sum(p.numel() for p in agent.module.model.parameters())
-        agent_RND_predictor_total_params = sum(p.numel() for p in agent.module.rnd.predictor.parameters())
+        agent_RND_predictor_total_params = sum(p.numel() for p in agent.module.rnd.predictor.parameters()) if agent.module.rnd is not None else 0
         agent_representation_model_total_params = sum(p.numel() for p in agent.module.representation_model.parameters()) if agent.module.representation_model is not None else 0
         logger.log_msg_to_both_console_and_file(f"{'*'*20}\
             \nNumber of PPO parameters: {agent_PPO_total_params}\
@@ -286,6 +289,8 @@ def main(args):
                         next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size])) # [1, input_size, input_size]
                     elif train_method == 'modified_RND':
                         next_obs.append(s) # [stateStackSize, input_size, input_size]
+                    elif (train_method == 'PPO') and is_render: # next_obs is just used for rendering purposes
+                        next_obs.append(s) # [stateStackSize, input_size, input_size]
                 
 
                 if is_render:
@@ -293,15 +298,18 @@ def main(args):
                         renderer.render(np.stack(next_obs[-num_env_workers:])) # [num_env, 1, input_size, input_size]
                     elif train_method == 'modified_RND':
                         renderer.render(np.stack(next_obs[-num_env_workers:])[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
-                if len(next_obs) % (num_step * num_env_workers) == 0:
-                    next_obs = np.stack(next_obs) # modified_RND: [(num_step * num_env_workers), stateStackSize, input_size, input_size], original_RND:[(num_step * num_env_workers), 1, input_size, input_size]
-                    if train_method == 'original_RND':
-                        obs_rms.update(next_obs)
-                    elif train_method == 'modified_RND':
-                        with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
-                            extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
-                        obs_rms.update(extracted_feature_embeddings)
-                    next_obs = []
+                    elif train_method == 'PPO':
+                        renderer.render(np.stack(next_obs[-num_env_workers:])[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
+                if train_method in ['original_RND', 'modified_RND']:
+                    if len(next_obs) % (num_step * num_env_workers) == 0:
+                        next_obs = np.stack(next_obs) # modified_RND: [(num_step * num_env_workers), stateStackSize, input_size, input_size], original_RND:[(num_step * num_env_workers), 1, input_size, input_size]
+                        if train_method == 'original_RND':
+                            obs_rms.update(next_obs)
+                        elif train_method == 'modified_RND':
+                            with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                                extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
+                            obs_rms.update(extracted_feature_embeddings)
+                        next_obs = []
             if is_render:
                 renderer.close()
             logger.log_msg_to_both_console_and_file('End to initialize...', only_rank_0=True)
@@ -363,7 +371,8 @@ def main(args):
                 next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
                 rewards = np.hstack(rewards) # -> [num_env, ]
                 dones = np.hstack(dones) # -> [num_env, ]
-                next_obs = np.stack(next_obs) # -> modified_RND: [num_env, stateStackSize, H, W], original_RND: [num_env, 1, H, W]
+                if train_method in ['original_RND', 'modified_RND']:
+                    next_obs = np.stack(next_obs) # -> modified_RND: [num_env, stateStackSize, H, W], original_RND: [num_env, 1, H, W]
 
                 # Compute normalize obs, compute intrinsic rewards and clip them (note that: total reward = int reward + ext reward)
                 if train_method == 'original_RND':
@@ -375,10 +384,12 @@ def main(args):
                         intrinsic_reward = agent.module.compute_intrinsic_reward(
                             ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
 
-                intrinsic_reward = np.hstack(intrinsic_reward) # [num_env,]
+                if train_method in ['original_RND', 'modified_RND']:
+                    intrinsic_reward = np.hstack(intrinsic_reward) # [num_env,]
 
                 total_next_obs.append(next_obs) # --> modified_RND: [num_step, num_env, state_stack_size, H, W], original_RND: [num_step, num_env, 1, H, W]
-                total_int_reward.append(intrinsic_reward)
+                if train_method in ['original_RND', 'modified_RND']:
+                    total_int_reward.append(intrinsic_reward)
                 total_state.append(states)
                 total_reward.append(rewards)
                 total_done.append(dones)
@@ -394,6 +405,8 @@ def main(args):
                         renderer.render(next_obs) # [num_env, 1, input_size, input_size]
                     elif train_method == 'modified_RND':
                         renderer.render(next_obs[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
+                    elif train_method == 'PPO':
+                        renderer.render(next_states[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
 
             # calculate last next value
             _, value_ext, value_int, _ = agent.module.get_action(np.float32(states) / 255.)
@@ -414,15 +427,16 @@ def main(args):
 
 
             # Step 2. calculate intrinsic reward
-            # running mean intrinsic reward
-            total_int_reward = np.stack(total_int_reward).transpose() # --> [num_env, num_step]
-            total_reward_per_env = np.array([discounted_reward.update(reward_per_step) for reward_per_step in
-                                            total_int_reward.T])
-            mean, std, count = np.mean(total_reward_per_env), np.std(total_reward_per_env), len(total_reward_per_env)
-            reward_rms.update_from_moments(mean, std ** 2, count) # update reward normalization parameters using intrinsic rewards
+            if train_method in ['original_RND', 'modified_RND']:
+                # running mean intrinsic reward
+                total_int_reward = np.stack(total_int_reward).transpose() # --> [num_env, num_step]
+                total_reward_per_env = np.array([discounted_reward.update(reward_per_step) for reward_per_step in
+                                                total_int_reward.T])
+                mean, std, count = np.mean(total_reward_per_env), np.std(total_reward_per_env), len(total_reward_per_env)
+                reward_rms.update_from_moments(mean, std ** 2, count) # update reward normalization parameters using intrinsic rewards
 
-            # normalize intrinsic reward
-            total_int_reward /= np.sqrt(reward_rms.var)
+                # normalize intrinsic reward
+                total_int_reward /= np.sqrt(reward_rms.var)
             # -------------------------------------------------------------------------------------------
 
             # Step 3. make target and advantage
@@ -435,16 +449,20 @@ def main(args):
                                                 num_env_workers)
 
             # intrinsic reward calculate
-            # None Episodic (hence the np.zeros() for the done input)
-            int_target, int_adv = make_train_data(total_int_reward,
-                                                np.zeros_like(total_int_reward),
-                                                total_int_values,
-                                                int_gamma,
-                                                num_step,
-                                                num_env_workers)
+            if train_method in ['original_RND', 'modified_RND']:
+                # None Episodic (hence the np.zeros() for the done input)
+                int_target, int_adv = make_train_data(total_int_reward,
+                                                    np.zeros_like(total_int_reward),
+                                                    total_int_values,
+                                                    int_gamma,
+                                                    num_step,
+                                                    num_env_workers)
 
             # add ext adv and int adv
-            total_adv = int_adv * int_coef + ext_adv * ext_coef
+            if train_method in ['original_RND', 'modified_RND']:
+                total_adv = int_adv * int_coef + ext_adv * ext_coef
+            else:
+                total_adv = ext_adv * ext_coef
             # -----------------------------------------------
 
             # Step 4. update obs normalize param
@@ -459,7 +477,8 @@ def main(args):
 
             # Logging
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (extrinsic) vs Parameter updates', np.mean(total_reward), global_update, only_rank_0=True)
-            logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
+            if train_method in ['original_RND', 'modified_RND']:
+                logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
             if len(episode_lengths) > 0: # check if any episode has been completed yet
                 logger.log_scalar_to_tb_with_step('data/Mean undiscounted episodic return (over last 100 episodes) (extrinsic) vs Parameter updates', np.mean(undiscounted_episode_return), global_update, only_rank_0=True)
                 logger.log_scalar_to_tb_with_step('data/Mean episode lengths (over last 100 episodes) vs Parameter updates', np.mean(episode_lengths), global_update, only_rank_0=True)
@@ -502,8 +521,8 @@ def main(args):
                     **{
                         'agent.optimizer.state_dict': agent.module.optimizer.state_dict(),
                         'agent.model.state_dict': agent.module.model.state_dict(),
-                        'agent.rnd.predictor.state_dict': agent.module.rnd.predictor.state_dict(),
-                        'agent.rnd.target.state_dict': agent.module.rnd.target.state_dict(),
+                        'agent.rnd.predictor.state_dict': agent.module.rnd.predictor.state_dict() if agent.module.rnd is not None else None,
+                        'agent.rnd.target.state_dict': agent.module.rnd.target.state_dict() if agent.module.rnd is not None else None,
                     },
                     **({'agent.representation_model.state_dict': agent.module.representation_model.state_dict()} if representation_lr_method == "BYOL" else {}),
                     **({'agent.representation_model.state_dict': agent.module.representation_model.state_dict()} if representation_lr_method == "Barlow-Twins" else {}),
@@ -540,6 +559,10 @@ def main(args):
             elif train_method == 'modified_RND':
                 agent.module.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
                                 total_adv, ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
+                                total_policy, global_update)
+            elif train_method == 'PPO':
+                agent.module.train_model(np.float32(total_state) / 255., ext_target, None, total_action,
+                                total_adv, None,
                                 total_policy, global_update)
             logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | EXITTED TRAINING')
             

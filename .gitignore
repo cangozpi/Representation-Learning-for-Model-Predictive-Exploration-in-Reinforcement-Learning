@@ -44,4 +44,4 @@ lib/
 profile*.html
 profile*.json
 
-hpc_stuff
+hpc_stuff*
