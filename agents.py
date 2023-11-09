@@ -66,7 +66,7 @@ class RNDAgent(nn.Module):
         assert isinstance(logger, Logger)
         self.logger = logger
 
-        extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
+        extracted_feature_embedding_dim = self.model.extracted_feature_embedding_dim
         self.train_method = default_config['TrainMethod']
         assert self.train_method in ['PPO', 'original_RND', 'modified_RND']
         self.rnd = None

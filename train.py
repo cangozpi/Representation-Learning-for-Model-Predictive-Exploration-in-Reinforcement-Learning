@@ -118,7 +118,7 @@ def main(args):
     if train_method == 'original_RND':
         obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size), usage='obs_rms') # used for normalizing observations
     elif train_method == 'modified_RND':
-        extracted_feature_embedding_dim = 32 # TODO: set this automatically by calculation
+        extracted_feature_embedding_dim = CnnActorCriticNetwork.extracted_feature_embedding_dim
         obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim), usage='obs_rms') # used for normalizing observations
     elif train_method == 'PPO':
         obs_rms = None

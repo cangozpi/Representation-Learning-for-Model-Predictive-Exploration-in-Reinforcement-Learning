@@ -73,6 +73,10 @@ class Flatten(nn.Module):
 
 class CnnActorCriticNetwork(nn.Module):
     # Refer to: https://github.com/openai/random-network-distillation/blob/master/policies/cnn_policy_param_matched.py for the architecture
+
+    # self.extracted_feature_embedding_dim  = 448
+    extracted_feature_embedding_dim  = 128
+
     def __init__(self, input_size, output_size, use_noisy_net=False):
         super(CnnActorCriticNetwork, self).__init__()
 
@@ -108,7 +112,7 @@ class CnnActorCriticNetwork(nn.Module):
         #     nn.ReLU(),
         #     linear(
         #         256,
-        #         448),
+        #         CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # TODO: set extracted_feature_embedding_dim to 448 !
         #     nn.ReLU()
         # )
 
@@ -151,6 +155,8 @@ class CnnActorCriticNetwork(nn.Module):
         #         init.orthogonal_(self.extra_layer[i].weight, 0.1)
         #         self.extra_layer[i].bias.data.zero_()
 
+
+
         self.feature = nn.Sequential(
             nn.Conv2d(
                 in_channels=4, # TODO: this equals StateStackSize
@@ -171,32 +177,44 @@ class CnnActorCriticNetwork(nn.Module):
                 stride=1),
             nn.ReLU(),
             Flatten(),
+            # -- old smaller layers below:
+            # linear(
+            #     # 7 * 7 * 64, #TOOD: ?
+            #     # 23104 // 2,
+            #     # 200,
+            #     2048,
+            #     64),
+            # nn.ReLU(),
+            # linear(
+            #     64,
+            #     32),
+            # ---
             linear(
                 # 7 * 7 * 64, #TOOD: ?
                 # 23104 // 2,
                 # 200,
                 2048,
-                64),
+                256),
             nn.ReLU(),
             linear(
-                64,
-                32),
+                256,
+                CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 128
             nn.ReLU()
         )
 
         self.actor = nn.Sequential(
-            linear(32, 32),
+            linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
             nn.ReLU(),
-            linear(32, output_size)
+            linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size)
         )
 
         self.extra_layer = nn.Sequential(
-            linear(32, 32),
+            linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
             nn.ReLU()
         )
 
-        self.critic_ext = linear(32, 1)
-        self.critic_int = linear(32, 1)
+        self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
+        self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
         
 
     def forward(self, state):
