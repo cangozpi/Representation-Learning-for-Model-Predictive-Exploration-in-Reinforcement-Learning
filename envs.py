@@ -12,7 +12,7 @@ import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT
 
-from torch.multiprocessing import Pipe, Process
+from torch.multiprocessing import Process
 
 from model import *
 from config import *
@@ -238,13 +238,12 @@ class MontezumaInfoWrapper(gym.Wrapper):
         return self.env.reset(**kwargs)
 
 
-class AtariEnvironment():
+class AtariEnvironment(Environment):
     def __init__(
             self,
             env_id,
             is_render,
             env_idx,
-            dist_tags,
             history_size=4,
             h=84,
             w=84,
@@ -252,11 +251,16 @@ class AtariEnvironment():
             sticky_action=True,
             p=0.25,
             seed=42,
-            logger:Logger=None):
+            logger:Logger=None,
+            child_conn=None):
+        super(AtariEnvironment, self).__init__()
+        assert child_conn is not None
+        self.child_conn = child_conn
+        self.daemon = True
+
         self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
         self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
 
-        self.dist_tags = dist_tags
 
         self.env = gym.make(env_id, render_mode="rgb_array" if is_render else None)
         if sticky_action:
@@ -288,11 +292,14 @@ class AtariEnvironment():
     # from torch.distributed.elastic.multiprocessing.errors import record
     # @record
     def run(self):
+        super(AtariEnvironment, self).run()
         while True:
-            action = torch.zeros(self.action_dim, dtype=torch.int64)
-            dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
+            # action = torch.zeros(self.action_dim, dtype=torch.int64)
+            # dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
+            action = self.child_conn.recv()
+            # assert ...
 
-            if 'Breakout' in self.env_id:
+            if 'Breakout' in self.env_id: # TODO: not sure why other implementations do this. Find it out
                 action += 1
 
             state, reward, done, trun, info = self.env.step(action)
@@ -303,24 +310,29 @@ class AtariEnvironment():
                 self.recent_rlist.append(self.rall)
 
 
-                if 'Montezuma' in self.env_id:
-                    self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}, visited_rooms: {info.get("episode", {}).get("visited_rooms", {})}')
-                else:
-                    self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}')
+                if self.logger is not None:
+                    if 'Montezuma' in self.env_id:
+                        self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}, visited_rooms: {info.get("episode", {}).get("visited_rooms", {})}')
+                    else:
+                        self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}')
 
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
-            dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
-            dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
-            dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            # dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
+            # dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
+            # dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
+            # dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            self.child_conn.send([state, reward, done, trun])
 
             if done or trun:
                 if 'Montezuma' in self.env_id:
-                    dist.send(torch.tensor(len(info['episode']['visited_rooms']), dtype=torch.float64), dst=0, tag=self.dist_tags['number_of_visited_rooms'])
-                dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
-                dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+                    # dist.send(torch.tensor(len(info['episode']['visited_rooms']), dtype=torch.float64), dst=0, tag=self.dist_tags['number_of_visited_rooms'])
+                    self.child_conn.send([len(info['episode']['visited_rooms']), info.get("episode", {}).get("visited_rooms", {})])
+                # dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
+                # dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+                # self.child_conn.send([info['episode']['undiscounted_episode_return'], info['episode']['l']])
+                self.child_conn.send([info['episode']['undiscounted_episode_return'], info['episode']['l'], info['episode']['num_finished_episodes']])
 
 
             # dist.gather_object(info, None, dst=0)
@@ -334,13 +346,12 @@ class AtariEnvironment():
         return state, info
 
 
-class MarioEnvironment():
+class MarioEnvironment(Environment):
     def __init__(
             self,
             env_id,
             is_render,
             env_idx,
-            dist_tags,
             history_size=4,
             life_done=False,
             h=84,
@@ -348,11 +359,16 @@ class MarioEnvironment():
             sticky_action=True,
             p=0.25,
             seed=42,
-            logger:Logger=None):
+            logger:Logger=None,
+            child_conn=None):
+        super(MarioEnvironment, self).__init__()
+        self.child_conn = child_conn
+        self.daemon = True
+
+        self.daemon = True
         self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
         self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
 
-        self.dist_tags = dist_tags
 
         self.env = gym_super_mario_bros.make(env_id, apply_api_compatibility=True, render_mode = "rgb_array")
         JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs) # See: https://stackoverflow.com/questions/76509663/typeerror-joypadspace-reset-got-an-unexpected-keyword-argument-seed-when-i
@@ -386,9 +402,12 @@ class MarioEnvironment():
 
 
     def run(self):
+        super(MarioEnvironment, self).run()
         while True:
-            action = torch.zeros(self.action_dim, dtype=torch.int64)
-            dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
+            # action = torch.zeros(self.action_dim, dtype=torch.int64)
+            # dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
+            action = self.child_conn.recv()
+            # assert ...
 
             state, reward, done, trun, info = self.env.step(action.item())
 
@@ -411,19 +430,22 @@ class MarioEnvironment():
             if done or trun:
                 self.recent_rlist.append(self.rall)
 
-                self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}, visited_rooms: {info.get("episode", {}).get("visited_rooms", {})}, stage: {info["stage"]}, current_x: {info["x_pos"]}, max_x: {self.max_pos}')
+                if self.logger is not None:
+                    self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}, visited_rooms: {info.get("episode", {}).get("visited_rooms", {})}, stage: {info["stage"]}, current_x: {info["x_pos"]}, max_x: {self.max_pos}')
 
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
-            dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
-            dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
-            dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            # dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
+            # dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
+            # dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
+            # dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            self.child_conn.send([state, reward, done, trun])
 
             if done or trun:
-                dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
-                dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+                # dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
+                # dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+                self.child_conn.send([info['episode']['undiscounted_episode_return'], info['episode']['l'], info['episode']['num_finished_episodes']])
 
 
     def reset(self, **kwargs):
@@ -463,13 +485,12 @@ class RGBArrayAsObservationWrapper(gym.Wrapper):
         return obs, reward, done, _, info
 
 
-class ClassicControlEnvironment():
+class ClassicControlEnvironment(Environment):
     def __init__(
             self,
             env_id,
             is_render,
             env_idx,
-            dist_tags,
             history_size=4,
             h=84,
             w=84,
@@ -477,11 +498,15 @@ class ClassicControlEnvironment():
             sticky_action=True,
             p=0.25,
             seed=42,
-            logger:Logger=None):
+            logger:Logger=None,
+            child_conn=None):
+        super(ClassicControlEnvironment, self).__init__()
+        self.child_conn = child_conn
+        self.daemon = True
+
         self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
         self.NODE_MASTER_GLOBAL_RANK = (self.GLOBAL_RANK // self.LOCAL_WORLD_SIZE) * self.LOCAL_WORLD_SIZE # global rank of the master process (process running agent.train()) in the current node
 
-        self.dist_tags = dist_tags
 
         self.env = gym.make(env_id, render_mode="rgb_array")
         self.env = RGBArrayAsObservationWrapper(self.env)
@@ -513,9 +538,12 @@ class ClassicControlEnvironment():
         # self.env.seed(seed)
 
     def run(self):
+        super(ClassicControlEnvironment, self).run()
         while True:
-            action = torch.zeros(self.action_dim, dtype=torch.int64)
-            dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
+            # action = torch.zeros(self.action_dim, dtype=torch.int64)
+            # dist.recv(action, src=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['action'])
+            action = self.child_conn.recv()
+            # assert ...
 
 
             state, reward, done, trun, info = self.env.step(action.numpy())
@@ -525,19 +553,22 @@ class ClassicControlEnvironment():
             if done or trun:
                 self.recent_rlist.append(self.rall)
 
-                self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}')
+                if self.logger is not None:
+                    self.logger.log_msg_to_both_console_and_file(f'[Rank: {self.GLOBAL_RANK}] episode: {self.episode}, step: {self.env.steps}, undiscounted_return: {self.rall}, moving_average_undiscounted_return: {np.mean(self.recent_rlist)}')
 
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
-            dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
-            dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
-            dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            # dist.send(torch.tensor(state, dtype=torch.uint8), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['state'])
+            # dist.send(torch.tensor(reward, dtype=torch.float64), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['reward'])
+            # dist.send(torch.tensor(done, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['done'])
+            # dist.send(torch.tensor(trun, dtype=torch.bool), dst=self.NODE_MASTER_GLOBAL_RANK, tag=self.dist_tags['truncated'])
+            self.child_conn.send([state, reward, done, trun])
 
             if done or trun:
-                dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
-                dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+                # dist.send(torch.tensor(info['episode']['undiscounted_episode_return'], dtype=torch.float64), dst=0, tag=self.dist_tags['undiscounted_episode_return'])
+                # dist.send(torch.tensor(info['episode']['l'], dtype=torch.float64), dst=0, tag=self.dist_tags['episode_length'])
+                self.child_conn.send([info['episode']['undiscounted_episode_return'], info['episode']['l'], info['episode']['num_finished_episodes']])
 
 
 
@@ -572,10 +603,10 @@ class Monitor(gym.Wrapper):
         if done or trun:
             eprew = sum(self.rewards)
             eplen = len(self.rewards)
-            epinfo = {"undiscounted_episode_return": round(eprew, 6), "l": eplen, "t": round(time.time() - self.tstart, 6)}
             self.episode_rewards.append(eprew)
             self.episode_lengths.append(eplen)
             self.episode_times.append(time.time() - self.tstart)
+            epinfo = {"undiscounted_episode_return": round(eprew, 6), "l": eplen, "t": round(time.time() - self.tstart, 6), "num_finished_episodes": len(self.episode_rewards)}
             if "episode" not in info:
                 info["episode"] = {}
             info['episode'].update(epinfo)

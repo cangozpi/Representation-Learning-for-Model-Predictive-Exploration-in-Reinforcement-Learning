@@ -2,6 +2,9 @@ import os
 import torch
 from torch.distributed import init_process_group, destroy_process_group
 import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.multiprocessing import Pipe
+from config import *
 
 def get_dist_info():
     GLOBAL_WORLD_SIZE = int(os.environ["WORLD_SIZE"])
@@ -14,37 +17,41 @@ def get_dist_info():
 def ddp_setup(logger, use_cuda):
     """
     Setups torch.distributed and creates p_groups for training.
+    In every node, the processes created by torch distributed (i.e. processes belonging to the default process group), will act 
+    as the agent_processes which contain DPP covered Deep RL agent and perform training. Each of these agent processes will get a unique
+    GPU, so you should have as many GPUs available as the number of agent processes you create in each node. Also, each agent process will
+    manually spawn --num_env_per_agent_process many environment processes which it will communicate over python multiprocessing Pipe to interact with the 
+    environments in parallel. To get a better understanding check out the example below:
     In every node, 1 process (process with local_rank == 0) is assigned to the agents_group, the remaining processes are
     assigned to the env_workers_group. To get a better understanding check out the example below.
-    agents_group processes have an instance of RNDAgent and perform optimizations.
-    env_workers_group processes have an instance of the environment and perform interactions with it.
 
 
     Example:
         Available from torchrun:
             nnodes: number of nodes = 3
-            nproc_per_node: number of processes per node = 4
+            nproc_per_node: number of processes per node = 2
+            num_env_per_agent_process = 16
         ---
 
         ************** NODE 0:
-        LOCAL_RANK 0: GPUs --> agents_group
-        LOCAL_RANK != 0: CPUs --> env_workers_group
+        LOCAL_RANK 0: GPU0 --> agent process 0: spawns 16 environment processes (env processes 0 ... 15) and interact with them
+        LOCAL_RANK 1: GPU1 --> agent process 1: spawns 16 environment processes (env processes 16 ... 31) and interact with them
         **************
         ...
 
         ************** NODE: 1:
-        LOCAL_RANK 0: GPUs --> agents_group
-        LOCAL_RANK != 0: CPUs --> env_workers_group
+        LOCAL_RANK 2: GPU2 --> agent process 2: spawns 16 environment processes (env processes 32 ... 47) and interact with them
+        LOCAL_RANK 3: GPU3 --> agent process 3: spawns 16 environment processes (env processes 48 ... 63) and interact with them
         **************
         ...
 
         ************** NODE: 2:
-        LOCAL_RANK 0: GPUs --> agents_group
-        LOCAL_RANK != 0: CPUs --> env_workers_group
+        LOCAL_RANK 4: GPU4 --> agent process 4: spawns 16 environment processes (env processes 64 ... 79) and interact with them
+        LOCAL_RANK 5: GPU5 --> agent process 5: spawns 16 environment processes (env processes 80 ... 95) and interact with them
         **************
 
         -node0-  -node1-   -node2-
-        0,1,2,3  4,5,6,7  8,9,10,11    ||    agents_group_ranks=[0,4,8], env_workers_group_rank=[remaining ranks]
+          0,1,     2,3,      4,5    ||
         *        *        *
 
     """
@@ -61,51 +68,44 @@ def ddp_setup(logger, use_cuda):
         gpu_id = "cpu"
         backend = "gloo"
 
-    if torch.cuda.is_available() and use_cuda and is_agents_group_member():
-        torch.cuda.set_device(gpu_id) # GPU should only be used by the agents_group processes and each process should have a unique cuda device (otherwise see the error at: https://github.com/pytorch/torchrec/issues/328)
-    init_process_group(backend="gloo")
+    if torch.cuda.is_available() and use_cuda:
+        torch.cuda.set_device(gpu_id) # each process should have a unique cuda device (otherwise see the error at: https://github.com/pytorch/torchrec/issues/328)
+    init_process_group(backend=backend)
 
-    agents_group, env_workers_group, agents_group_global_ranks, env_workers_group_global_ranks, env_workers_group_per_node_global_ranks = create_process_groups_for_training(agents_group_backend=backend, env_workers_group_backend="gloo")
-
-    logger.log_msg_to_both_console_and_file(f'Initializing process with global_rank: {GLOBAL_RANK}, local_rank: {LOCAL_RANK}, local_world_size: {LOCAL_WORLD_SIZE}, global_world_size: {GLOBAL_WORLD_SIZE}, [{gpu_id}], group: {"agents_group" if GLOBAL_RANK in agents_group_global_ranks else "env_workers_group"}, group_backend: {backend if GLOBAL_RANK in agents_group_global_ranks else "gloo"}, default_backend: {backend}')
+    logger.log_msg_to_both_console_and_file(f'Initialized process with global_rank: {GLOBAL_RANK}, local_rank: {LOCAL_RANK}, local_world_size: {LOCAL_WORLD_SIZE}, global_world_size: {GLOBAL_WORLD_SIZE}, [{gpu_id}], backend: {backend}')
     
-    return GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id, agents_group, env_workers_group, agents_group_global_ranks, env_workers_group_global_ranks, env_workers_group_per_node_global_ranks
+    return GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id 
 
-def is_agents_group_member():
+
+def create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_action, action_prob, life_done, stateStackSize, seed, logger):
     """
-    returns True if the process belongs to the agents_group, False otherwise.
+    Creates num_env_per_process many environment processes. Each one of these processes run a gym environment.
+    Returns:
+        env_workers (list): contains references to started environment processes.
+        parent_conns (list): contains one end of the Pipe connnections which are used for IPC btw main process and the environment processes.
+        child_conns (list): contains the other end of the Pipe connnections which are used for IPC btw main process and the environment processes.
     """
     GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK = get_dist_info()
-    return GLOBAL_RANK % LOCAL_WORLD_SIZE == 0
 
+    mp.set_start_method('spawn') # required to avoid python's GIL issue, (also logger cannot be passed to env process constructor, see the issue: https://discuss.pytorch.org/t/thread-lock-object-cannot-be-pickled-when-using-pytorch-multiprocessing-package-with-spawn-method/184953)
 
-def create_process_groups_for_training(agents_group_backend="nccl", env_workers_group_backend="gloo"):
-    GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK = get_dist_info()
+    env_workers = []
+    parent_conns = []
+    child_conns = []
+    for idx in range(num_env_per_process):
+        parent_conn, child_conn = Pipe()
+        
+        from copy import deepcopy
+        env_worker = env_type(env_id, False, GLOBAL_RANK, sticky_action=sticky_action, p=action_prob,
+                            life_done=life_done, history_size=stateStackSize, seed=seed+idx, child_conn=child_conn) # Note that seed+rank is required to make parallel envs play different scenarios
+        env_worker.start()
+        env_workers.append(env_worker)
+        parent_conns.append(parent_conn)
+        child_conns.append(child_conn)
 
-    # Calculate ranks for the groups:
-    agents_group_global_ranks = list(filter(lambda x: x != None, [rank if rank % LOCAL_WORLD_SIZE == 0 else None for rank in range(GLOBAL_WORLD_SIZE)]))
-    env_workers_group_global_ranks = list(filter(lambda x: x != None, [rank if rank % LOCAL_WORLD_SIZE != 0 else None for rank in range(GLOBAL_WORLD_SIZE)]))
-    env_workers_group_per_node_global_ranks = [rank for rank in range((GLOBAL_RANK//LOCAL_WORLD_SIZE) * LOCAL_WORLD_SIZE, ((GLOBAL_RANK//LOCAL_WORLD_SIZE) + 1) * LOCAL_WORLD_SIZE)][1:]
-
-    # Create groups from the calculated ranks:
-    agents_group = dist.new_group(
-        ranks=agents_group_global_ranks, 
-        backend=agents_group_backend
-        ) # group for agent processes across nodes
-
-    env_workers_group = dist.new_group(
-        ranks=env_workers_group_global_ranks, 
-        backend=env_workers_group_backend
-        ) # group for env_worker processes across nodes
-
-    env_workers_group_per_node = dist.new_group(
-        ranks=env_workers_group_per_node_global_ranks, 
-        backend=env_workers_group_backend
-        ) # group for env_worker processes per node
-
-    assert len(env_workers_group_per_node_global_ranks) == (LOCAL_WORLD_SIZE - 1)
-
-    return agents_group, env_workers_group, agents_group_global_ranks, env_workers_group_global_ranks, env_workers_group_per_node_global_ranks
+        logger.log_msg_to_both_console_and_file(f'Created environment process worker_env: {idx}, for agent process [rank={GLOBAL_RANK}]')
+    
+    return env_workers, parent_conns, child_conns
 
 
 def distributed_cleanup():
