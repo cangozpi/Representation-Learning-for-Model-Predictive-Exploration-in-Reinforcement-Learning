@@ -63,7 +63,8 @@ def ddp_setup(logger, use_cuda):
 
     if torch.cuda.is_available() and use_cuda and is_agents_group_member():
         torch.cuda.set_device(gpu_id) # GPU should only be used by the agents_group processes and each process should have a unique cuda device (otherwise see the error at: https://github.com/pytorch/torchrec/issues/328)
-    init_process_group(backend="gloo")
+    # init_process_group(backend="gloo")
+    init_process_group(backend="gloo", init_method="file:///home/cangozpi/Desktop/rnd/Representation Learning for Model-Predictive Exploration in Reinforcement Learning/tempSharedFile", rank=GLOBAL_RANK, world_size=GLOBAL_WORLD_SIZE) #TODO: make sure shared file passes to init_method is removed after termination and a new unique file is created for each run
 
     agents_group, env_workers_group, agents_group_global_ranks, env_workers_group_global_ranks, env_workers_group_per_node_global_ranks = create_process_groups_for_training(agents_group_backend=backend, env_workers_group_backend="gloo")
 

@@ -25,6 +25,8 @@ def main(args):
                  agents_group_global_ranks, env_workers_group_global_ranks, env_workers_group_per_node_global_ranks = ddp_setup(logger, use_cuda)
     
     dist.barrier() # wait for process initialization logging inside ddp_setup() to finish
+    print(os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'])
+    breakpoint()
     
     dist_tags = {
         'action': 0,
