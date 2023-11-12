@@ -20,7 +20,7 @@ def ddp_setup(logger, use_cuda):
     In every node, the processes created by torch distributed (i.e. processes belonging to the default process group), will act 
     as the agent_processes which contain DPP covered Deep RL agent and perform training. Each of these agent processes will get a unique
     GPU, so you should have as many GPUs available as the number of agent processes you create in each node. Also, each agent process will
-    manually spawn --num_env_per_agent_process many environment processes which it will communicate over python multiprocessing Pipe to interact with the 
+    manually spawn --num_env_per_process many environment processes which it will communicate over python multiprocessing Pipe to interact with the 
     environments in parallel. To get a better understanding check out the example below:
     In every node, 1 process (process with local_rank == 0) is assigned to the agents_group, the remaining processes are
     assigned to the env_workers_group. To get a better understanding check out the example below.
@@ -77,7 +77,7 @@ def ddp_setup(logger, use_cuda):
     return GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id 
 
 
-def create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_action, action_prob, life_done, stateStackSize, seed, logger):
+def create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_action, action_prob, life_done, stateStackSize, input_size, seed, logger):
     """
     Creates num_env_per_process many environment processes. Each one of these processes run a gym environment.
     Returns:
@@ -87,7 +87,8 @@ def create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_
     """
     GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK = get_dist_info()
 
-    mp.set_start_method('spawn') # required to avoid python's GIL issue, (also logger cannot be passed to env process constructor, see the issue: https://discuss.pytorch.org/t/thread-lock-object-cannot-be-pickled-when-using-pytorch-multiprocessing-package-with-spawn-method/184953)
+    if default_config['EnvType'] == 'atari': # other env_type's raise a pickling related error
+        mp.set_start_method('spawn') # required to avoid python's GIL issue, (also logger cannot be passed to env process constructor, see the issue: https://discuss.pytorch.org/t/thread-lock-object-cannot-be-pickled-when-using-pytorch-multiprocessing-package-with-spawn-method/184953)
 
     env_workers = []
     parent_conns = []
@@ -96,7 +97,7 @@ def create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_
         parent_conn, child_conn = Pipe()
         
         from copy import deepcopy
-        env_worker = env_type(env_id, False, GLOBAL_RANK, sticky_action=sticky_action, p=action_prob,
+        env_worker = env_type(env_id=env_id, is_render=False, env_idx=GLOBAL_RANK, sticky_action=sticky_action, p=action_prob, h=input_size, w=input_size,
                             life_done=life_done, history_size=stateStackSize, seed=seed+idx, child_conn=child_conn) # Note that seed+rank is required to make parallel envs play different scenarios
         env_worker.start()
         env_workers.append(env_worker)

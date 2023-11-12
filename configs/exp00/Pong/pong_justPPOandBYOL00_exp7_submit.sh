@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 129 --standalone main.py --train --config_path=./configs/exp00/Pong/config_justPPOandBYOL00.conf --log_name=pong_justPPOandBYOL00_exp7 --save_model_path=checkpoints/Pong/pong_justPPOandBYOL00_exp7.ckpt
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 128 --config_path=./configs/exp00/Pong/config_justPPOandBYOL00.conf --log_name=pong_justPPOandBYOL00_exp7 --save_model_path=checkpoints/Pong/pong_justPPOandBYOL00_exp7.ckpt

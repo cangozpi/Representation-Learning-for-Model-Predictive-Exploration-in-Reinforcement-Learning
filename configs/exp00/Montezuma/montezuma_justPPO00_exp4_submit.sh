@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 129 --standalone main.py --train --config_path=./configs/exp00/Montezuma/config_justPPO00.conf --log_name=montezuma_justPPO00_exp4 --save_model_path=checkpoints/Montezuma/montezuma_justPPO00_exp4.ckpt
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 128 --config_path=./configs/exp00/Montezuma/config_justPPO00.conf --log_name=montezuma_justPPO00_exp4 --save_model_path=checkpoints/Montezuma/montezuma_justPPO00_exp4.ckpt

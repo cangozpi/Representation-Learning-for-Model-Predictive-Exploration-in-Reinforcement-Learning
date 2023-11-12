@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 129 --standalone main.py --train --config_path=./configs/exp00/Montezuma/config_modifiedRND00.conf --log_name=montezuma_modifiedRND00_exp2 --save_model_path=checkpoints/Montezuma/montezuma_modifiedRND00_exp2.ckpt
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 128 --config_path=./configs/exp00/Montezuma/config_modifiedRND00.conf --log_name=montezuma_modifiedRND00_exp2 --save_model_path=checkpoints/Montezuma/montezuma_modifiedRND00_exp2.ckpt

@@ -36,13 +36,13 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
 
 * Train RND agent in MontezumaRevenge from scratch:
     ```bash
-    torchrun --nnodes 1 --nproc_per_node 128 --standalone main.py --train --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
+    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
     ```
 
 * Continue Training RND agent from a checkpoint in MontezumaRevenge:
     1. set _loadModel = True_ in the corresponding config file.
     ```bash
-    torchrun --nnodes 1 --nproc_per_node 128 --standalone main.py --train --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00_cont00 --save_model_path=checkpoints/MontezumaRevenge/rnd00_cont00.ckpt --load_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
+    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00_cont00 --save_model_path=checkpoints/MontezumaRevenge/rnd00_cont00.ckpt --load_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
     ```
 * Note that this examples uses 1 node and 128 processes in total. It will have 1 process as agent/trainer and another 127 processes as environment workers. You can modify the parameters of torchrun to suit your needs.
 

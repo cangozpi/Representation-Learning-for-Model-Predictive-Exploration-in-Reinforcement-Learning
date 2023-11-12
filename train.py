@@ -33,7 +33,8 @@ def main(args):
     #     only_rank_0=True
     #     )
 
-    num_env_per_process = 3 # TODO: set this from argument_parser
+    num_env_per_process = int(args['num_env_per_process'])
+    assert num_env_per_process > 1, "num_env_per_process has to be larger than 1"
     num_env_workers = num_env_per_process
 
     seed = args['seed'] + (GLOBAL_RANK * num_env_workers) # set different seed to every env_worker process so that every env does not play the same game
@@ -129,7 +130,7 @@ def main(args):
 
 
     # Create environment processes
-    _, env_worker_parent_conns, _ = create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_action, action_prob, life_done, stateStackSize, seed, logger)
+    _, env_worker_parent_conns, _ = create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_action, action_prob, life_done, stateStackSize, input_size, seed, logger)
 
 
     agent = agent(
@@ -165,37 +166,19 @@ def main(args):
         if use_cuda:
             load_checkpoint = torch.load(load_ckpt_path, map_location=gpu_id)
             agent.load_state_dict(load_checkpoint['agent.state_dict'])
-            # agent.model.load_state_dict(load_checkpoint['agent.model.state_dict'])
-            # agent.rnd.predictor.load_state_dict(load_checkpoint['agent.rnd.predictor.state_dict'])
-            # agent.rnd.target.load_state_dict(load_checkpoint['agent.rnd.target.state_dict'])
             if representation_lr_method == "BYOL": # BYOL
-                # agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 assert agent.representation_model.net is agent.model.feature
-                # agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-                # assert agent.representation_model.net is agent.model.feature
             if representation_lr_method == "Barlow-Twins": # Barlow-Twins
-                # agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 assert agent.representation_model.backbone is agent.model.feature
-                # agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-                # assert agent.representation_model.backbone is agent.model.feature
             # agent.optimizer.load_state_dict(load_checkpoint['agent.optimizer.state_dict'])
 
         else:
             load_checkpoint = torch.load(load_ckpt_path, map_location='cpu')
             agent.load_state_dict(load_checkpoint['agent.state_dict'])
-            # agent.model.load_state_dict(load_checkpoint['agent.model.state_dict'])
-            # agent.rnd.predictor.load_state_dict(load_checkpoint['agent.rnd.predictor.state_dict'])
-            # agent.rnd.target.load_state_dict(load_checkpoint['agent.rnd.target.state_dict'])
             if representation_lr_method == "BYOL": # BYOL
-                # agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 assert agent.representation_model.net is agent.model.feature
-                # agent.representation_model.net = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-                # assert agent.representation_model.net is agent.model.feature
             if representation_lr_method == "Barlow-Twins": # Barlow-Twins
-                # agent.representation_model.load_state_dict(load_checkpoint['agent.representation_model.state_dict'])
                 assert agent.representation_model.backbone is agent.model.feature
-                # agent.representation_model.backbone = agent.model.feature # representation_model's net should map to the feature extractor of the RL algo
-                # assert agent.representation_model.backbone is agent.model.feature
             # agent.optimizer.load_state_dict(load_checkpoint['agent.optimizer.state_dict'])
             
             
@@ -242,9 +225,6 @@ def main(args):
 
     states = np.zeros([num_env_workers, stateStackSize, input_size, input_size])
         
-    NUM_LOCAL_ENV_WORKERS = LOCAL_WORLD_SIZE - 1 # number of env worker processes running on the current node
-    LOCAL_ENV_WORKER_GLOBAL_RANKS = [GLOBAL_RANK + env_worker_local_rank for env_worker_local_rank in range(1, (NUM_LOCAL_ENV_WORKERS + 1))] # global ranks of the env workers which are working on the current node
-
     # normalize obs
     if is_load_model == False:
         logger.log_msg_to_both_console_and_file('Start to initialize observation normalization parameter.....', only_rank_0=True)
@@ -252,19 +232,12 @@ def main(args):
             renderer = ParallelizedEnvironmentRenderer(num_env_workers)
         next_obs = []
         for step in range(num_step * pre_obs_norm_step):
-            actions = torch.tensor(np.random.randint(0, output_size, size=(num_env_workers,)), dtype=torch.int64)
+            actions = np.random.randint(0, output_size, size=(num_env_workers,)).astype(dtype=np.int64)
 
             for parent_conn, action in zip(env_worker_parent_conns, actions):
                 parent_conn.send(action)
                 
             for env_idx, parent_conn in enumerate(env_worker_parent_conns):
-            # for local_env_worker_global_rank in LOCAL_ENV_WORKER_GLOBAL_RANKS:
-            #     s, r, d, trun = torch.zeros(stateStackSize, input_size, input_size, dtype=torch.uint8), torch.zeros(1, dtype=torch.float64), torch.zeros(1, dtype=torch.bool), torch.zeros(1, dtype=torch.bool)
-            #     dist.recv(s, src=local_env_worker_global_rank, tag=dist_tags['state'])
-            #     dist.recv(r, src=local_env_worker_global_rank, tag=dist_tags['reward'])
-            #     dist.recv(d, src=local_env_worker_global_rank, tag=dist_tags['done'])
-            #     dist.recv(trun, src=local_env_worker_global_rank, tag=dist_tags['truncated'])
-
                 s, r, d, trun = parent_conn.recv()
                 assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
                 assert type(r) == float
@@ -273,14 +246,8 @@ def main(args):
 
                 if d or trun:
                     info = {'episode': {}}
-                    # info['episode']['undiscounted_episode_return'] = torch.zeros(1, dtype=torch.float64)
-                    # info['episode']['l'] = torch.zeros(1, dtype=torch.float64)
                     if 'Montezuma' in env_id:
-                        # info['episode']['number_of_visited_rooms'] = torch.zeros(1, dtype=torch.float64)
-                        # dist.recv(info['episode']['number_of_visited_rooms'], src=local_env_worker_global_rank, tag=dist_tags['number_of_visited_rooms'])
                         info['episode']['number_of_visited_rooms'], info['episode']['visited_rooms'] = parent_conn.recv()
-                    # dist.recv(info['episode']['undiscounted_episode_return'], src=local_env_worker_global_rank, tag=dist_tags['undiscounted_episode_return'])
-                    # dist.recv(info['episode']['l'], src=local_env_worker_global_rank, tag=dist_tags['episode_length'])
                     info['episode']['undiscounted_episode_return'], info['episode']['l'], info['episode']['num_finished_episodes'] = parent_conn.recv()
                     # Logging:
                     if 'Montezuma' in env_id:
@@ -307,10 +274,13 @@ def main(args):
                 if len(next_obs) % (num_step * num_env_workers) == 0:
                     next_obs = np.stack(next_obs) # modified_RND: [(num_step * num_env_workers), stateStackSize, input_size, input_size], original_RND:[(num_step * num_env_workers), 1, input_size, input_size]
                     if train_method == 'original_RND':
+                        assert (list(next_obs.shape) == [num_step*num_env_workers, 1, input_size, input_size])
                         obs_rms.update(next_obs)
                     elif train_method == 'modified_RND':
                         with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                            assert (list(next_obs.shape) == [num_step*num_env_workers, stateStackSize, input_size, input_size])
                             extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
+                            assert (list(extracted_feature_embeddings.shape) == [num_step*num_env_workers, extracted_feature_embedding_dim])
                         obs_rms.update(extracted_feature_embeddings)
                     next_obs = []
         if is_render:
@@ -334,20 +304,17 @@ def main(args):
 
         # Step 1. n-step rollout
         for step in range(num_step):
-            actions, value_ext, value_int, policy = agent.module.get_action(np.float32(states) / 255.)
-            actions = torch.tensor(actions, dtype=torch.int64)
+            actions, value_ext, value_int, policy = agent.module.get_action(np.float32(states) / 255.) # TODO: np.float32'yi kaldır ve assert le çöz
+            assert (list(actions.shape) == [num_env_workers, ]) and (actions.dtype == np.int64)
+            assert (list(value_ext.shape) == [num_env_workers, ]) and (value_ext.dtype == np.float32)
+            assert (list(value_int.shape) == [num_env_workers, ]) and (value_ext.dtype == np.float32)
+            assert (list(policy.shape) == [num_env_workers, output_size]) and (policy.dtype == np.float32)
 
             for parent_conn, action in zip(env_worker_parent_conns, actions):
                 parent_conn.send(action)
 
 
             next_states, rewards, dones, next_obs = [], [], [], []
-            # for local_env_worker_global_rank in LOCAL_ENV_WORKER_GLOBAL_RANKS:
-            #     s, r, d, trun = torch.zeros(stateStackSize, input_size, input_size, dtype=torch.uint8), torch.zeros(1, dtype=torch.float64), torch.zeros(1, dtype=torch.bool), torch.zeros(1, dtype=torch.bool)
-            #     dist.recv(s, src=local_env_worker_global_rank, tag=dist_tags['state'])
-            #     dist.recv(r, src=local_env_worker_global_rank, tag=dist_tags['reward'])
-            #     dist.recv(d, src=local_env_worker_global_rank, tag=dist_tags['done'])
-            #     dist.recv(trun, src=local_env_worker_global_rank, tag=dist_tags['truncated'])
             for env_idx, parent_conn in enumerate(env_worker_parent_conns):
                 s, r, d, trun = parent_conn.recv()
                 assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
@@ -365,15 +332,9 @@ def main(args):
 
                 if d or trun:
                     info = {'episode': {}}
-                    # info['episode']['undiscounted_episode_return'] = torch.zeros(1, dtype=torch.float64)
-                    # info['episode']['l'] = torch.zeros(1, dtype=torch.float64)
                     if 'Montezuma' in env_id:
-                        # info['episode']['number_of_visited_rooms'] = torch.zeros(1, dtype=torch.float64)
-                        # dist.recv(info['episode']['number_of_visited_rooms'], src=local_env_worker_global_rank, tag=dist_tags['number_of_visited_rooms'])
                         info['episode']['number_of_visited_rooms'], info['episode']['visited_rooms'] = parent_conn.recv()
                         number_of_visited_rooms.append(info['episode']['number_of_visited_rooms'])
-                    # dist.recv(info['episode']['undiscounted_episode_return'], src=local_env_worker_global_rank, tag=dist_tags['undiscounted_episode_return'])
-                    # dist.recv(info['episode']['l'], src=local_env_worker_global_rank, tag=dist_tags['episode_length'])
                     info['episode']['undiscounted_episode_return'], info['episode']['l'], info['episode']['num_finished_episodes'] = parent_conn.recv()
                     undiscounted_episode_return.append(info['episode']['undiscounted_episode_return'])
                     episode_lengths.append(info['episode']['l'])
@@ -387,16 +348,22 @@ def main(args):
             next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
             rewards = np.hstack(rewards) # -> [num_env, ]
             dones = np.hstack(dones) # -> [num_env, ]
+            assert (list(next_states.shape) == [num_env_workers, stateStackSize, input_size, input_size]) and (next_states.dtype == np.float64)
+            assert (list(rewards.shape) == [num_env_workers, ]) and (rewards.dtype == np.float64)
+            assert (list(dones.shape) == [num_env_workers, ]) and (dones.dtype == np.bool)
             if train_method in ['original_RND', 'modified_RND']:
                 next_obs = np.stack(next_obs) # -> modified_RND: [num_env, stateStackSize, H, W], original_RND: [num_env, 1, H, W]
 
             # Compute normalize obs, compute intrinsic rewards and clip them (note that: total reward = int reward + ext reward)
             if train_method == 'original_RND':
+                assert (list(next_obs.shape) == [num_env_workers, 1, input_size, input_size])
                 intrinsic_reward = agent.module.compute_intrinsic_reward(
                     ((next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
             elif train_method == 'modified_RND':
                 with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
+                    assert (list(next_obs.shape) == [num_env_workers, stateStackSize, input_size, input_size])
                     extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs, feature_embeddings_dim]
+                    assert (list(extracted_feature_embeddings.shape) == [num_env_workers, extracted_feature_embedding_dim])
                     intrinsic_reward = agent.module.compute_intrinsic_reward(
                         ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
 
@@ -436,10 +403,20 @@ def main(args):
         total_done = np.stack(total_done).transpose() # --> [num_env, num_step]
         if train_method == 'original_RND':
             total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, 1, input_size, input_size]) # --> [num_env * num_step, 1, H, W]
+            assert (list(total_next_obs.shape) == [num_env_workers*num_step, 1, input_size, input_size]) and (total_next_obs.dtype == np.float64)
         elif train_method == 'modified_RND':
             total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
+            assert (list(total_next_obs.shape) == [num_env_workers*num_step, stateStackSize, input_size, input_size]) and (total_next_obs.dtype == np.float64)
         total_ext_values = np.stack(total_ext_values).transpose() # --> [num_env, (num_step + 1)]
         total_int_values = np.stack(total_int_values).transpose() # --> [num_env, (num_step + 1)]
+        total_policy = np.stack(total_policy) # --> [num_step, num_env, output_size]
+        assert (list(total_state.shape) == [num_env_workers*num_step, stateStackSize, input_size, input_size]) and (total_state.dtype == np.float64)
+        assert (list(total_reward.shape) == [num_env_workers, num_step]) and (total_reward.dtype == np.float64)
+        assert (list(total_action.shape) == [num_env_workers*num_step]) and (total_action.dtype == np.int64)
+        assert (list(total_done.shape) == [num_env_workers, num_step]) and (total_done.dtype == np.bool)
+        assert (list(total_ext_values.shape) == [num_env_workers, (num_step + 1)]) and (total_ext_values.dtype == np.float32)
+        assert (list(total_int_values.shape) == [num_env_workers, (num_step + 1)]) and (total_int_values.dtype == np.float32)
+        assert (list(total_policy.shape) == [num_step, num_env_workers, output_size]) and (total_policy.dtype == np.float32)
 
 
         # Step 2. calculate intrinsic reward

@@ -18,6 +18,7 @@ def get_args():
     parser.add_argument("--eval", type=bool, default=False, const=True, nargs='?', help="When specified, the agent will be evaluated (tested).")
     parser.add_argument("--load_model_path", type=str, default='./checkpoints/ckpt00.ckpt', help="if \'load_model\' is set to True in the config file, then the corresponding model (agent) will be loaded from the path specified by the value of this argument.")
     parser.add_argument("--save_model_path", type=str, default='./checkpoints/ckpt00.ckpt', help="Checkpoints will be saved during the model (agent) training to the path specified by this argument.")
+    parser.add_argument("--num_env_per_process", type=int, default=128, help="specifies the number of parallel environment workers (processes) spawned by every agent process (i.e. processes spawned by torch distributed).")
     parser.add_argument("--config_options", type=bool, default=False, const=True, nargs='?', help="Prints explanations of available parameters in config.conf files (see \'--config-path\').")
     parser.add_argument("--pytorch_profiling", type=bool, default=False, const=True, nargs='?', help="Uses pytorch profiler and saves the logs at 'logs/torch_profiler_logs' directory.")
     parser.add_argument("--scalene_profiling", type=int, default=-1, const=0, nargs='?', help="Uses scalene profiler. Pass this option an integer to specify the number of rollouts (i.e. calls to agent.train_model()) to execute before terminating the profiling process. -1 indicates scalene profiling is off.")

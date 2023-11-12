@@ -162,14 +162,13 @@ class RNDAgent(nn.Module):
             raise NotImplementedError()
 
     def get_action(self, state):
-        state = torch.Tensor(state).to(self.device)
-        state = state.float()
+        state = torch.Tensor(state).type(torch.float32).to(self.device)
         policy, value_ext, value_int = self.model(state)
         action_prob = F.softmax(policy, dim=-1).data.cpu().numpy()
 
         action = self.random_choice_prob_index(action_prob)
 
-        return action, value_ext.data.cpu().numpy().squeeze(), value_int.data.cpu().numpy().squeeze(), policy.detach()
+        return action, value_ext.detach().cpu().numpy().squeeze(), value_int.detach().cpu().numpy().squeeze(), policy.detach().cpu().numpy()
 
     @staticmethod
     def random_choice_prob_index(p, axis=1):
@@ -228,7 +227,7 @@ class RNDAgent(nn.Module):
                 if self.train_method in ['original_RND', 'modified_RND']:
                     normalized_extracted_feature_embeddings_batch = torch.FloatTensor(normalized_extracted_feature_embeddings)[batch_indices].to(self.device)
                 with torch.no_grad():
-                    policy_old_list = torch.stack(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[batch_indices].to(self.device)
+                    policy_old_list = torch.tensor(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[batch_indices].to(self.device) # --> [num_env*batch_size, output_size]
                     m_old = Categorical(F.softmax(policy_old_list, dim=-1))
                     log_prob_old = m_old.log_prob(y_batch)
 
