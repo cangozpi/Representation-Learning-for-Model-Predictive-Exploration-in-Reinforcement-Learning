@@ -202,7 +202,7 @@ def main(args):
         logger.log_msg_to_both_console_and_file('loading finished!', only_rank_0=True)
         
     if "cuda" in gpu_id: # SyncBatchNorm layers only work with GPU modules
-        agent = nn.SyncBatchNorm.convert_sync_batchnorm(agent, process_group=agents_group) # synchronizes batch norm stats for dist training
+        agent = nn.SyncBatchNorm.convert_sync_batchnorm(agent, process_group=None) # synchronizes batch norm stats for dist training
 
     agent = DDP(
         agent, 
@@ -350,7 +350,7 @@ def main(args):
             dones = np.hstack(dones) # -> [num_env, ]
             assert (list(next_states.shape) == [num_env_workers, stateStackSize, input_size, input_size]) and (next_states.dtype == np.float64)
             assert (list(rewards.shape) == [num_env_workers, ]) and (rewards.dtype == np.float64)
-            assert (list(dones.shape) == [num_env_workers, ]) and (dones.dtype == np.bool)
+            assert (list(dones.shape) == [num_env_workers, ]) and (dones.dtype == np.bool_)
             if train_method in ['original_RND', 'modified_RND']:
                 next_obs = np.stack(next_obs) # -> modified_RND: [num_env, stateStackSize, H, W], original_RND: [num_env, 1, H, W]
 
@@ -413,7 +413,7 @@ def main(args):
         assert (list(total_state.shape) == [num_env_workers*num_step, stateStackSize, input_size, input_size]) and (total_state.dtype == np.float64)
         assert (list(total_reward.shape) == [num_env_workers, num_step]) and (total_reward.dtype == np.float64)
         assert (list(total_action.shape) == [num_env_workers*num_step]) and (total_action.dtype == np.int64)
-        assert (list(total_done.shape) == [num_env_workers, num_step]) and (total_done.dtype == np.bool)
+        assert (list(total_done.shape) == [num_env_workers, num_step]) and (total_done.dtype == np.bool_)
         assert (list(total_ext_values.shape) == [num_env_workers, (num_step + 1)]) and (total_ext_values.dtype == np.float32)
         assert (list(total_int_values.shape) == [num_env_workers, (num_step + 1)]) and (total_int_values.dtype == np.float32)
         assert (list(total_policy.shape) == [num_step, num_env_workers, output_size]) and (total_policy.dtype == np.float32)
