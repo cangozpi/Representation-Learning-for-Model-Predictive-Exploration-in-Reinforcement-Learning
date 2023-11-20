@@ -1,0 +1,46 @@
+virtual memory'miz fazla --> htop (VIRT)
+
+exps:
+64 processli devam
+--
+1)düz ppo montezuma
+2) intrinsic loss'u 1000 yerine 100 e bölmeli original+modified+RND
+3) kızın 32 rnd arkada devam
+4) 16 processlie montezuma dursun
+5,6) intrinsic loss'u 1000 yerine 10 e bölmeli original+modified+RND
+* boş kalana da düz ppo montezuma gerisi
+
+2000 step'te haber 
+
+===== Summary:
+Montezuma 64 process (detaylı loglamayı da kapat bence daha hızlı trainleyebilir !!!):
+	1) Just PPO  
+	2,3) intrinsic loss'u 1000 yerine 100'e bolmeli -> (original_rnd + modified_rnd) = [IntCoef = 0.1] (Note original IntCoef=1)
+	4,5) intrinsic loss'u 1000 yerine 10'a bolmeli -> (original_rnd + modified_rnd) = [IntCoef = 0.01] (Note original IntCoef=1)
+	-
+	6) kızın 32 process'li rnd'si arkada devam etsin.
+	7) bizim 64 process montezuma devam etsin.
+	8) bizim 16 process montezuma devam etsin.
+	-
+	7,8) boş kalana da düz ppo montezuma gerisi farklı process sayılarıyla dene (max alabildiğin process spawn sayıyısını arıyoruz)
+		or
+	     scalene ve torchprofiler runla
+	        or
+	     rdzv-endpoint'li bir çalışacak mı diye 64 process'li 2 node da deneybillirsin belki ?
+	
+	= 2000 step'de Barış hocaya sonuçları bildir (~Çarşamba sabahı)
+====
+
+default Coefficients:
+** critic_loss = critic_ext_loss + critic_int_loss **
+*** loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss ***
+
+	*) self.ent_coef --> 0.01 (config'de bile değil direk default bu bununla oynama bence) 
+	*) self.representation_loss_coef --> 1.0 (Barlow ve BYOL'da da aynı)
+	
+*** total_adv = int_adv * int_coef + ext_adv * ext_coef ***
+	*) IntCoef = 1
+	*) ExtCoef = 2
+
+
+self.ent_coef --> 0.01 (config'de bile değil direk default bu bununla oynama bence)
