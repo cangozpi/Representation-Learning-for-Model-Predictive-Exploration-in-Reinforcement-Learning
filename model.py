@@ -75,7 +75,7 @@ class CnnActorCriticNetwork(nn.Module):
     # Refer to: https://github.com/openai/random-network-distillation/blob/master/policies/cnn_policy_param_matched.py for the architecture
 
     # self.extracted_feature_embedding_dim  = 448
-    extracted_feature_embedding_dim  = 128
+    extracted_feature_embedding_dim  = 1024
 
     def __init__(self, input_size, output_size, use_noisy_net=False):
         super(CnnActorCriticNetwork, self).__init__()
