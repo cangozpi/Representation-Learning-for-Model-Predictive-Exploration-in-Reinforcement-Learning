@@ -19,6 +19,7 @@ from torch.profiler import ProfilerActivity
 from dist_utils import get_dist_info
 from config import args
 
+import wandb
 
 class RNDAgent(nn.Module):
     def __init__(
@@ -114,6 +115,7 @@ class RNDAgent(nn.Module):
             self.rnd = self.rnd.to(self.device)
         if self.representation_model is not None:
             self.representation_model = self.representation_model.to(self.device)
+        
     
     def get_agent_parameters(self):
         """
@@ -239,7 +241,6 @@ class RNDAgent(nn.Module):
                 if self.rnd is not None:
                     # Note that gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
                     predict_next_state_feature, target_next_state_feature = self.rnd(normalized_extracted_feature_embeddings_batch)
-
                     rnd_loss = forward_mse(predict_next_state_feature, target_next_state_feature.detach()).mean(-1)
                     # Proportion of exp used for predictor update
                     mask = torch.rand(len(rnd_loss)).to(self.device)
@@ -409,15 +410,52 @@ class RNDAgent(nn.Module):
                 self.logger.step_pytorch_profiler(pytorch_profiler_log_path)
 
             
-            # logging
+            # logging (wandb):
+            if self.logger.use_wandb and GLOBAL_RANK == 0:
+                epoch_log_dict = {
+                    'train/overall_loss (everything combined) vs epoch': np.mean(total_loss),
+                    'train/PPO_actor_loss vs epoch': np.mean(total_actor_loss),
+                    'train/PPO_critic_loss (intrinsic + extrinsic) vs epoch': np.mean(total_critic_loss),
+                    'train/PPO_critic_loss (extrinsic) vs epoch': np.mean(total_critic_loss_ext),
+                    'train/PPO_entropy_loss vs epoch': np.mean(total_entropy_loss),
+                }
+                if self.rnd is not None:
+                    epoch_log_dict = {
+                        **epoch_log_dict,
+                        'train/PPO_critic_loss (intrtinsic) vs epoch': np.mean(total_critic_loss_int),
+                        'train/RND_loss vs epoch': np.mean(total_rnd_loss)
+                    }
+                if self.representation_model is not None:
+                    epoch_log_dict = {
+                        **epoch_log_dict,
+                        f'train/Representation_loss({self.representation_lr_method}) vs epoch': np.mean(total_representation_loss),
+                    }
+                if default_config.getboolean('verbose_logging') == True:
+                    epoch_log_dict = {
+                        **epoch_log_dict,
+                        'grads/grad_norm_unclipped': np.mean(total_grad_norm_unclipped),
+                    }
+                    if default_config.getboolean('UseGradClipping') == True:
+                        epoch_log_dict = {
+                            **epoch_log_dict,
+                            'grads/grad_norm_clipped': np.mean(total_grad_norm_clipped)
+                        }
+                epoch_log_dict = {f'wandb_{k}': v for (k, v) in epoch_log_dict.items()}
+                epoch = self.logger.tb_global_steps['epoch']
+                wandb.log({
+                    'epoch': epoch,
+                    **epoch_log_dict
+                })
+                self.logger.tb_global_steps['epoch'] = self.logger.tb_global_steps['epoch'] + 1
+
+            # logging (tb):
             self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_actor_loss vs epoch', np.mean(total_actor_loss), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss), only_rank_0=True)
-            if self.rnd is not None:
-                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss), only_rank_0=True)
             if self.rnd is not None:
+                self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
             if self.representation_model is not None:
                 self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
@@ -431,4 +469,30 @@ class RNDAgent(nn.Module):
                     self.logger.log_parameters_in_model_to_tb_without_step(self.rnd, f'RND', only_rank_0=True)
                 if self.representation_model is not None:
                     self.logger.log_parameters_in_model_to_tb_without_step(self.representation_model, f'{self.representation_lr_method}', only_rank_0=True)
-                
+    
+
+    def add_tb_graph(self, batch_size, stateStackSize, input_size):
+        """
+        Logs a graph of forward passes of RNN, PPO, and Representation Model used under tensorboard's graph tab.
+        """
+        _, GLOBAL_RANK, _, _ = get_dist_info()
+        if GLOBAL_RANK == 0:
+            with torch.no_grad():
+                def graph_forward(dummy_state_batch):
+                    if self.model is not None: # PPO
+                        policy, value_ext, value_int = self.model(dummy_state_batch)
+                    if self.representation_model is not None: # Representation model
+                        representation_output = self.representation_model(dummy_state_batch, dummy_state_batch)
+                    if self.rnd is not None: # RND
+                        if self.train_method == 'original_RND':
+                            extracted_feature_embeddings = dummy_state_batch
+                        elif self.train_method == 'modified_RND':
+                            extracted_feature_embeddings = self.extract_feature_embeddings(dummy_state_batch / 255).cpu() # [(num_step * num_env_workers), feature_embeddings_dim]
+                        predict_next_state_feature, target_next_state_feature = self.rnd(extracted_feature_embeddings)
+                    return policy, value_ext, value_int, representation_output, predict_next_state_feature, target_next_state_feature
+
+                tmp_forward = self.forward
+                self.forward = graph_forward
+                dummy_state_batch = torch.zeros(batch_size, stateStackSize, input_size, input_size).to(self.device)
+                self.logger.tb_summaryWriter.add_graph(self, dummy_state_batch)
+                self.forward = tmp_forward

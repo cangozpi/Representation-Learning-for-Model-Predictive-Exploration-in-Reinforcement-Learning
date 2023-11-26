@@ -22,6 +22,8 @@ def get_args():
     parser.add_argument("--config_options", type=bool, default=False, const=True, nargs='?', help="Prints explanations of available parameters in config.conf files (see \'--config-path\').")
     parser.add_argument("--pytorch_profiling", type=bool, default=False, const=True, nargs='?', help="Uses pytorch profiler and saves the logs at 'logs/torch_profiler_logs' directory.")
     parser.add_argument("--scalene_profiling", type=int, default=-1, const=0, nargs='?', help="Uses scalene profiler. Pass this option an integer to specify the number of rollouts (i.e. calls to agent.train_model()) to execute before terminating the profiling process. -1 indicates scalene profiling is off.")
+    parser.add_argument("--use_wandb", type=bool, default=False, const=True, nargs='?', help="If True, then wandb is also used for logging, else ony tensorboard is used. Defaults to using both wandb and tensorboard (True)")
+    parser.add_argument("--wandb_api_key", type=str, default='', const=True, nargs='?', help="If passed, then 'WANDB_API_KEY' environment variable is set to your passed in value and this is used to login to wandb.")
 
     # args = vars(parser.parse_args())
 

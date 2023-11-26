@@ -45,3 +45,4 @@ profile*.html
 profile*.json
 
 hpc_stuff*
+wandb

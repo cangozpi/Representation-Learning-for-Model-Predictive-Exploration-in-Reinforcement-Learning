@@ -25,20 +25,25 @@ def main(args):
 
 
     logger.GLOBAL_RANK = GLOBAL_RANK
-    # logger.log_msg_to_both_console_and_file(
-    #     "*" * 30 + "\n" +
-    #     str(dict(**{section: dict(config[section]) for section in config.sections()}, **args)) + "\n"
-    #     + f'total number of agent workers: {len(agents_group_global_ranks)}, total number of environment workers: {len(env_workers_group_global_ranks)}, number of agent workers per node: {1}, number of environment workers per node: {len(env_workers_group_per_node_global_ranks)}'
-    #     + "\n" + "*" * 30,
-    #     only_rank_0=True
-    #     )
+    # Log configurations
+    logger.log_msg_to_both_console_and_file(
+        "*" * 30 + "\n" +
+        str({k: v if k != 'wandb_api_key' else 'XXX' for (k,v) in {
+            **default_config, 
+            **args, 
+            **{
+                'GLOBAL_WORLD_SIZE': GLOBAL_WORLD_SIZE,
+            }}.items()}) + "\n"
+        + "\n" + "*" * 30,
+        only_rank_0=True
+        )
 
     num_env_per_process = int(args['num_env_per_process'])
     assert num_env_per_process > 1, "num_env_per_process has to be larger than 1"
     num_env_workers = num_env_per_process
 
     seed = args['seed'] + (GLOBAL_RANK * num_env_workers) # set different seed to every env_worker process so that every env does not play the same game
-    set_seed(seed) # Note: this will not seed the gym environment
+    set_seed(args['seed']) # Note: this will not seed the gym environment
 
 
     train_method = default_config['TrainMethod']
@@ -153,6 +158,17 @@ def main(args):
         device=gpu_id,
         logger=logger,
     )
+
+    # Log agent network architecture:
+    logger.log_msg_to_both_console_and_file("=" * 30 + "\n" + \
+        f'{agent}' + \
+        "\n" + "=" * 30 + "\n",
+        only_rank_0=True)
+
+    agent.add_tb_graph(batch_size, stateStackSize, input_size)
+
+    if (default_config.getboolean('verbose_logging') == True) and (logger.use_wandb == True): # Log gradients and parameters of the model using wandb
+        wandb.watch(agent, log_freq=1, log_graph=True, log='all')
 
     global_update = 0
     global_step = 0
@@ -468,7 +484,36 @@ def main(args):
             obs_rms.update(extracted_feature_embeddings)
         # -----------------------------------------------
 
-        # Logging
+
+        # Logging (wandb):
+        if logger.use_wandb and GLOBAL_RANK == 0:
+            parameterUpdates_log_dict = {
+                'data/Mean of rollout rewards (extrinsic) vs Parameter updates': np.mean(total_reward),
+            }
+            if train_method in ['original_RND', 'modified_RND']:
+                parameterUpdates_log_dict = {
+                    **parameterUpdates_log_dict,
+                    'data/Mean of rollout rewards (intrinsic) vs Parameter updates': np.mean(total_int_reward)
+                } 
+            if len(episode_lengths) > 0: # check if any episode has been completed yet
+                parameterUpdates_log_dict = {
+                    **parameterUpdates_log_dict,
+                    'data/Mean undiscounted episodic return (over last 100 episodes) (extrinsic) vs Parameter updates': np.mean(undiscounted_episode_return),
+                    'data/Mean episode lengths (over last 100 episodes) vs Parameter updates': np.mean(episode_lengths),
+                } 
+                if 'Montezuma' in env_id:
+                    parameterUpdates_log_dict = {
+                        **parameterUpdates_log_dict,
+                        'data/Mean number of rooms found (over last 100 episodes) vs Parameter updates': np.mean(number_of_visited_rooms)
+                    } 
+        
+            parameterUpdates_log_dict = {f'wandb_{k}': v for (k, v) in parameterUpdates_log_dict.items()}
+            wandb.log({
+                'parameter updates': global_update,
+                **parameterUpdates_log_dict
+            })
+
+        # Logging (tb):
         logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (extrinsic) vs Parameter updates', np.mean(total_reward), global_update, only_rank_0=True)
         if train_method in ['original_RND', 'modified_RND']:
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
@@ -498,12 +543,16 @@ def main(args):
                 ckpt_path = ''.join([*save_ckpt_path.split('.')[:-1], "__BestModelForMeanExtrinsicRolloutRewards", '.' ,*save_ckpt_path.split('.')[-1:]])
                 logger.log_msg_to_both_console_and_file(f'New high score for mean of rollout rewards (extrinsic): {np.mean(total_reward)}, saving checkpoint: {ckpt_path}', only_rank_0=True)
                 highest_mean_total_reward = np.mean(total_reward)
+                if logger.use_wandb:
+                    wandb.run.summary['Best Score for mean of rollout rewards (extrinsic)'] = highest_mean_total_reward
                 ckpt_paths.append(ckpt_path)
                 
             if highest_mean_undiscounted_episode_return < np.mean(undiscounted_episode_return): # checkpointing the best performing agent so far for the metric mean undiscounted episode return
                 ckpt_path = ''.join([*save_ckpt_path.split('.')[:-1], "__BestModelForMeanUndiscountedEpisodeReturn", '.' ,*save_ckpt_path.split('.')[-1:]])
                 logger.log_msg_to_both_console_and_file(f'New high score for mean undiscounted episodic return (over last 100 episodes) (extrinsic): {np.mean(undiscounted_episode_return)}, saving checkpoint: {ckpt_path}', only_rank_0=True)
                 highest_mean_undiscounted_episode_return = np.mean(undiscounted_episode_return)
+                if logger.use_wandb:
+                    wandb.run.summary['Best Score for mean undiscounted episodic return (over last 100 episodes) (extrinsic)'] = highest_mean_undiscounted_episode_return
                 ckpt_paths.append(ckpt_path)
 
 

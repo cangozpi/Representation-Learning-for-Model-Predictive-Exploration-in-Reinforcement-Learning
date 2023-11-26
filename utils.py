@@ -17,6 +17,7 @@ from matplotlib import pyplot as plt
 import torch.profiler
 from torch.profiler import ProfilerActivity
 from dist_utils import distributed_cleanup
+import wandb
 
 
 # train_method = default_config['TrainMethod']
@@ -183,6 +184,8 @@ class Logger:
         """
         Custom logger with the ability of logging to console, file and Tensorboard.
         """
+        self.GLOBAL_RANK = int(os.environ["RANK"])
+
         # Make sure log_file_name exists since logging throws error if it does not exist
         file_log_path = file_log_path + '.log'
         if file_log_path is not None:
@@ -220,6 +223,29 @@ class Logger:
         self.console_logger.propagate = False
         self.file_logger.propagate = False
 
+        # Initialize WandB --------------------------------------------------------------------------
+        self.use_wandb = bool(args['use_wandb'])
+        if self.use_wandb and (self.GLOBAL_RANK == 0): # only rank 0 process logs to wandb
+            if args['wandb_api_key'] != '':
+                os.environ['WANDB_API_KEY'] = args['wandb_api_key']
+            wandb.tensorboard.patch(pytorch=True, tensorboard_x=False, save=True, root_logdir=tb_log_path) # this must be called before tensorboard SummaryWriter is created
+            wandb.init(project='Representation Learning for Model-predictive Exploration', \
+                name=args['log_name'], job_type='training' if args['train'] else 'test', \
+                     config={k: v if k != 'wandb_api_key' else 'XXX' for (k,v) in {
+                        **default_config, 
+                        **args, 
+                        **{
+                            'GLOBAL_WORLD_SIZE': os.environ['WORLD_SIZE'],
+                        }}.items()},
+                        sync_tensorboard=True)
+
+            wandb.define_metric('parameter updates')
+            wandb.define_metric('wandb_data/*', step_metric='parameter updates')
+            wandb.define_metric('data/*', step_metric='parameter updates')
+
+            wandb.define_metric('epoch')
+            wandb.define_metric('wandb_train/*', step_metric='epoch')
+            wandb.define_metric('train/*', step_metric='epoch')
 
         # Initialize TensorBoard --------------------------------------------------------------------
         if tb_log_path is not None:
@@ -235,8 +261,7 @@ class Logger:
 
         self.scalene_profiling_count = int(args['scalene_profiling'])
 
-        self.GLOBAL_RANK = None # set manually in train.py
-        
+     
     def log_msg_to_console(self, msg):
         """
         Passed in message will be logged to console.
@@ -325,14 +350,14 @@ class Logger:
                     continue
                 if "weight" in name: # Model weight
                     if log_full_detail:
-                        self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step)
+                        self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step, max_bins=512)
                         self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), global_step)
 
                     all_weight_grads = torch.concat([all_weight_grads, param.grad.cpu().reshape(-1)])
 
                 elif "bias" in name: # Model bias
                     if log_full_detail:
-                        self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step)
+                        self.tb_summaryWriter.add_histogram("grad/"+model_name+"/"+name, param.grad, global_step, max_bins=512)
                         self.tb_summaryWriter.add_scalar("grad.mean/"+model_name+"/"+name, param.grad.mean(), global_step)
 
                     all_bias_grads = torch.concat([all_bias_grads, param.grad.cpu().reshape(-1)])
@@ -366,11 +391,11 @@ class Logger:
             # Log weights and biases to Tensorboard
             for name, param in model.named_parameters():
                 if "weight" in name: # Model weight
-                    self.tb_summaryWriter.add_histogram("weight/"+model_name+"/"+name, param, global_step)
+                    self.tb_summaryWriter.add_histogram("weight/"+model_name+"/"+name, param, global_step, max_bins=512)
                     self.tb_summaryWriter.add_scalar("weight.mean/"+model_name+"/"+name, param.mean(), global_step)
 
                 elif "bias" in name: # Model bias
-                    self.tb_summaryWriter.add_histogram("bias/"+model_name+"/"+name, param, global_step)
+                    self.tb_summaryWriter.add_histogram("bias/"+model_name+"/"+name, param, global_step, max_bins=512)
                     self.tb_summaryWriter.add_scalar("bias.mean/"+model_name+"/"+name, param.mean(), global_step)
 
             self.tb_global_steps[tag] = self.tb_global_steps[tag] + 1 # update global_step for the tag
