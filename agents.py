@@ -487,7 +487,7 @@ class RNDAgent(nn.Module):
                         if self.train_method == 'original_RND':
                             extracted_feature_embeddings = dummy_state_batch
                         elif self.train_method == 'modified_RND':
-                            extracted_feature_embeddings = self.extract_feature_embeddings(dummy_state_batch / 255).cpu() # [(num_step * num_env_workers), feature_embeddings_dim]
+                            extracted_feature_embeddings = self.extract_feature_embeddings(dummy_state_batch.detach().cpu().numpy() / 255).to(self.device) # [(num_step * num_env_workers), feature_embeddings_dim]
                         predict_next_state_feature, target_next_state_feature = self.rnd(extracted_feature_embeddings)
                     return policy, value_ext, value_int, representation_output, predict_next_state_feature, target_next_state_feature
 
