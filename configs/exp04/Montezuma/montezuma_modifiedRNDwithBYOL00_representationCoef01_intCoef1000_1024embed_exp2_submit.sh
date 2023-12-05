@@ -48,8 +48,8 @@ echo "======================="
 . /kuacc/apps/anaconda/3.6/etc/profile.d/conda.sh
 conda activate
 
-echo "Activating conda env: rnd2"
-conda activate rnd2
+echo "Activating conda env: rnd3"
+conda activate rnd3
 echo ""
 echo "======================================================================================"
 

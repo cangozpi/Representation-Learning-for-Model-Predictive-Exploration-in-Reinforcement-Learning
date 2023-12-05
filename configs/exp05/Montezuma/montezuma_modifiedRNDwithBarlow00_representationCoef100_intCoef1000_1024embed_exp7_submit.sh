@@ -22,7 +22,7 @@
 
 # -= Resources =-
 #
-#SBATCH --job-name=Montezuma_modifiedRNDwithBYOL00_representationCoef100_intCoef1000_1024embed_exp7_7day_batchjob
+#SBATCH --job-name=Montezuma_modifiedRNDwithBarlow00_representationCoef100_intCoef1000_1024embed_exp7_7day_batchjob
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=30
@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp04/Montezuma/config_modifiedRNDwithBYOL00_representationCoef100_intCoef1000.conf --log_name=montezuma_modifiedRNDwithBYOL00_representationCoef100_intCoef1000_1024embed_exp7 --save_model_path=checkpoints/exp04/Montezuma/montezuma_modifiedRNDwithBYOL00_representationCoef100_intCoef1000_1024embed_exp7.ckpt
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp05/Montezuma/config_modifiedRNDwithBarlow00_representationCoef100_intCoef1000.conf --log_name=montezuma_modifiedRNDwithBarlow00_representationCoef100_intCoef1000_1024embed_exp7 --save_model_path=checkpoints/exp05/Montezuma/montezuma_modifiedRNDwithBarlow00_representationCoef100_intCoef1000_1024embed_exp7.ckpt

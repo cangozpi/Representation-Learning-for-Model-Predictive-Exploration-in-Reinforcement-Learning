@@ -479,17 +479,23 @@ class RNDAgent(nn.Module):
         if GLOBAL_RANK == 0:
             with torch.no_grad():
                 def graph_forward(dummy_state_batch):
+                    return_vals = []
                     if self.model is not None: # PPO
                         policy, value_ext, value_int = self.model(dummy_state_batch)
+                        return_vals += [policy, value_ext, value_int]
                     if self.representation_model is not None: # Representation model
                         representation_output = self.representation_model(dummy_state_batch, dummy_state_batch)
+                        return_vals += [representation_output]
                     if self.rnd is not None: # RND
                         if self.train_method == 'original_RND':
                             extracted_feature_embeddings = dummy_state_batch
                         elif self.train_method == 'modified_RND':
                             extracted_feature_embeddings = self.extract_feature_embeddings(dummy_state_batch.detach().cpu().numpy() / 255).to(self.device) # [(num_step * num_env_workers), feature_embeddings_dim]
                         predict_next_state_feature, target_next_state_feature = self.rnd(extracted_feature_embeddings)
-                    return policy, value_ext, value_int, representation_output, predict_next_state_feature, target_next_state_feature
+                        return_vals += [predict_next_state_feature, target_next_state_feature]
+                    
+                    # return policy, value_ext, value_int, representation_output, predict_next_state_feature, target_next_state_feature
+                    return tuple(return_vals)
 
                 tmp_forward = self.forward
                 self.forward = graph_forward
