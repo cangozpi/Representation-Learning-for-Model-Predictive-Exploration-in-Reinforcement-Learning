@@ -5,6 +5,7 @@ import torch.optim as optim
 import numpy as np
 import math
 from torch.nn import init
+from config import default_config
 
 
 class NoisyLinear(nn.Module):
@@ -75,7 +76,7 @@ class CnnActorCriticNetwork(nn.Module):
     # Refer to: https://github.com/openai/random-network-distillation/blob/master/policies/cnn_policy_param_matched.py for the architecture
 
     # self.extracted_feature_embedding_dim  = 448
-    extracted_feature_embedding_dim  = 1024
+    extracted_feature_embedding_dim  = int(default_config['extracted_feature_embedding_dim'])
 
     def __init__(self, input_size, output_size, use_noisy_net=False):
         super(CnnActorCriticNetwork, self).__init__()
@@ -215,6 +216,7 @@ class CnnActorCriticNetwork(nn.Module):
 
         self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
         self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
+        breakpoint()
         
 
     def forward(self, state):
