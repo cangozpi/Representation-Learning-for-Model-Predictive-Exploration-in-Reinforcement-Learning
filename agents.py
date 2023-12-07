@@ -116,6 +116,9 @@ class RNDAgent(nn.Module):
         if self.representation_model is not None:
             self.representation_model = self.representation_model.to(self.device)
         
+
+        freeze_shared_backbone_during_training = default_config.getboolean('freeze_shared_backbone')
+        
     
     def get_agent_parameters(self):
         """
@@ -252,13 +255,13 @@ class RNDAgent(nn.Module):
                 representation_loss = 0
                 # --------------------------------------------------------------------------------
                 # for BYOL (Bootstrap Your Own Latent):
-                if self.representation_lr_method == "BYOL":
+                if (self.representation_lr_method == "BYOL") and (freeze_shared_backbone_during_training == False):
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
                     if default_config.getboolean('apply_same_transform_to_batch'):
                         s_batch_views = self.data_transform(torch.reshape(s_batch, [-1, H, W])[:, None, :, :]) # -> [B*STATE_STACK_SIZE, C=1, H, W], [B*STATE_STACK_SIZE, C=1, H, W]
                     else:
-                        s_batch_views = self.data_transform(s_batch) # -> [B*STATE_STACK_SIZE, C=STATE_STACK_SIZE, H, W], [B, C=STATE_STACK_SIZE, H, W]
+                        s_batch_views = self.data_transform(s_batch) # -> [B, C=STATE_STACK_SIZE, H, W], [B, C=STATE_STACK_SIZE, H, W]
                     s_batch_view1, s_batch_view2 = torch.reshape(s_batch_views[0], [B, STATE_STACK_SIZE, H, W]), \
                         torch.reshape(s_batch_views[1], [B, STATE_STACK_SIZE, H, W]) # -> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                 
@@ -298,7 +301,7 @@ class RNDAgent(nn.Module):
 
                 # --------------------------------------------------------------------------------
                 # for Barlow-Twins:
-                if self.representation_lr_method == "Barlow-Twins":
+                if (self.representation_lr_method == "Barlow-Twins") and (freeze_shared_backbone_during_training == False):
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
                     if default_config.getboolean('apply_same_transform_to_batch'):
