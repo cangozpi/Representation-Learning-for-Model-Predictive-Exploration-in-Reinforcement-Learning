@@ -149,11 +149,6 @@ baseline sonuçlarını alalım:
 hidden_size:1024'ile ilk
 4,5) SSL+PPO vs PPO
 ---------------------------------
-optional direction:
-        (PPO_backbone + SSL) ama RND image input üzerinden(original_RND gibi): PPO'nun backbone'u RND ile share edilmiyor.
-        *) original_RND + PPO + SSL
-        *) 2 step training (i.e. SSL pretraining mode)
-
 
 ****************** EXPERIMENTS SUMMARY:
 general configs: representationCoef001 (0.01), intCoef1000 (same as before and what worked best so far)
@@ -173,7 +168,11 @@ general configs: representationCoef001 (0.01), intCoef1000 (same as before and w
 Future dir:
 *)90deg projection of gradients from RL loss & repr_loss for better tuning: Representation loss'un gradientlarını ve RL'in gradientlarını uzayda iki vector olarak düşün. Eğer iki vector arasındaki derece fark'ı 90 dereceden fazla ise bu iki vektor iki farklı yöne çekiyor ve birbirlerine ters yönlerde update'ler yaparak training'i unstable hale getiriyorlar. Biz bu iki loss'un gradientlarının arasındaki fark'ın 90 dereceyi geçtiği yerlerde vector'ları 90 derece olacak şekilde project edersek o zaman birbirlerine ters yönlere çekmezler update'i. Böyle bir update yöntemi propose edip deneyebiliriz.
 *)RND ve learned network backbone paylaşsın !
-
+-
+Optional dir:
+        (PPO_backbone + SSL) ama RND image input üzerinden(original_RND gibi): PPO'nun backbone'u RND ile share edilmiyor.
+        *) original_RND + PPO + SSL
+        *) 2 step training (i.e. SSL pretraining mode)
 --
 
 

@@ -216,7 +216,6 @@ class CnnActorCriticNetwork(nn.Module):
 
         self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
         self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
-        breakpoint()
         
 
     def forward(self, state):

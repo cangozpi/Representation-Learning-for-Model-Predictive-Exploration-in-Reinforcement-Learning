@@ -117,7 +117,7 @@ class RNDAgent(nn.Module):
             self.representation_model = self.representation_model.to(self.device)
         
 
-        freeze_shared_backbone_during_training = default_config.getboolean('freeze_shared_backbone')
+        self.freeze_shared_backbone_during_training = default_config.getboolean('freeze_shared_backbone')
         
     
     def get_agent_parameters(self):
@@ -255,7 +255,7 @@ class RNDAgent(nn.Module):
                 representation_loss = 0
                 # --------------------------------------------------------------------------------
                 # for BYOL (Bootstrap Your Own Latent):
-                if (self.representation_lr_method == "BYOL") and (freeze_shared_backbone_during_training == False):
+                if (self.representation_lr_method == "BYOL") and (self.freeze_shared_backbone_during_training == False):
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
                     if default_config.getboolean('apply_same_transform_to_batch'):
@@ -301,7 +301,7 @@ class RNDAgent(nn.Module):
 
                 # --------------------------------------------------------------------------------
                 # for Barlow-Twins:
-                if (self.representation_lr_method == "Barlow-Twins") and (freeze_shared_backbone_during_training == False):
+                if (self.representation_lr_method == "Barlow-Twins") and (self.freeze_shared_backbone_during_training == False):
                     # sample image transformations and transform the images to obtain the 2 views
                     B, STATE_STACK_SIZE, H, W = s_batch.shape
                     if default_config.getboolean('apply_same_transform_to_batch'):
@@ -491,7 +491,7 @@ class RNDAgent(nn.Module):
                         return_vals += [representation_output]
                     if self.rnd is not None: # RND
                         if self.train_method == 'original_RND':
-                            extracted_feature_embeddings = dummy_state_batch
+                            extracted_feature_embeddings = dummy_state_batch[:, -1, None, :, :]
                         elif self.train_method == 'modified_RND':
                             extracted_feature_embeddings = self.extract_feature_embeddings(dummy_state_batch.detach().cpu().numpy() / 255).to(self.device) # [(num_step * num_env_workers), feature_embeddings_dim]
                         predict_next_state_feature, target_next_state_feature = self.rnd(extracted_feature_embeddings)

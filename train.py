@@ -245,13 +245,15 @@ def main(args):
 
     # Handle (un)freezing of PPO's shared backbone (i.e. feature extractor)
     if freeze_shared_backbone == True: # freeze backbone
-        for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.get_trainable_parameters()):
+        for p1 in agent.module.model.feature.parameters():
             p1.requires_grad = False
-            assert p2.requires_grad == False, "shared backbone is not frozen in all models, something is wrong with parameter sharing !" # make sure shared backbone is frozen in every sharing model
     else: # unfreeze backbone
-        for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.get_trainable_parameters()):
+        for p1 in agent.module.model.feature.parameters():
             p1.requires_grad = True
-            assert p2.requires_grad == True, "shared backbone is not frozen in all models, something is wrong with parameter sharing !" # make sure shared backbone is frozen in every sharing model
+    if representation_lr_method != 'None':
+        for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.get_trainable_parameters()):
+            assert p1.requires_grad == p2.requires_grad, "shared backbone is not frozen in all models, something is wrong with parameter sharing !" # make sure shared backbone is frozen in every sharing model
+                
 
     agent.module.set_mode("train")
 
@@ -740,7 +742,7 @@ def main(args):
 
         # Save checkpoint
         save_ckpt(global_step, num_env_workers, num_step, default_config, highest_mean_total_reward, total_reward, highest_mean_undiscounted_episode_return, undiscounted_episode_return, GLOBAL_RANK, \
-            logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, number_of_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, -1)
+            logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, number_of_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, float("inf"), -1)
 
         # update best scores:
         if highest_mean_undiscounted_episode_return < np.mean(undiscounted_episode_return): # checkpointing the best performing agent so far for the metric mean undiscounted episode return
