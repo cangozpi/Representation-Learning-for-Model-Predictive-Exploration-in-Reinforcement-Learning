@@ -87,6 +87,7 @@ class CnnActorCriticNetwork(nn.Module):
         else:
             linear = nn.Linear
 
+        # --------------- original paper's architecture below:
         # self.feature = nn.Sequential(
         #     nn.Conv2d(
         #         in_channels=4, # TODO: this equals StateStackSize
@@ -113,23 +114,23 @@ class CnnActorCriticNetwork(nn.Module):
         #     nn.ReLU(),
         #     linear(
         #         256,
-        #         CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # TODO: set extracted_feature_embedding_dim to 448 !
+        #         CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # TODO: set extracted_feature_embedding_dim to 448 to match original RND paper !
         #     nn.ReLU()
         # )
 
         # self.actor = nn.Sequential(
-        #     linear(448, 448),
+        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
         #     nn.ReLU(),
-        #     linear(448, output_size)
+        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size)
         # )
 
         # self.extra_layer = nn.Sequential(
-        #     linear(448, 448),
+        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
         #     nn.ReLU()
         # )
 
-        # self.critic_ext = linear(448, 1)
-        # self.critic_int = linear(448, 1)
+        # self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
+        # self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
 
         # for p in self.modules():
         #     if isinstance(p, nn.Conv2d):
@@ -156,8 +157,9 @@ class CnnActorCriticNetwork(nn.Module):
         #         init.orthogonal_(self.extra_layer[i].weight, 0.1)
         #         self.extra_layer[i].bias.data.zero_()
 
+        
 
-
+        # --------------- my architecture below:
         self.feature = nn.Sequential(
             nn.Conv2d(
                 in_channels=4, # TODO: this equals StateStackSize
