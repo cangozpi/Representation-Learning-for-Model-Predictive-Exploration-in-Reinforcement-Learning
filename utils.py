@@ -503,8 +503,9 @@ class Logger:
 class ParallelizedEnvironmentRenderer:
     def __init__(self, num_envs, figsize=(6, 8)):
         self.num_envs = num_envs
-        self.fig, self.axs = plt.subplots(num_envs, figsize=figsize, constrained_layout=True)
-        plt.ion()
+        if self.num_envs > 1:
+            self.fig, self.axs = plt.subplots(num_envs, figsize=figsize, constrained_layout=True)
+            plt.ion()
 
     def render(self, state):
         if self.num_envs > 1:
@@ -518,14 +519,27 @@ class ParallelizedEnvironmentRenderer:
                 labelleft=False,
                 labelbottom=False)
         else:
-            self.axs.imshow(state[0].squeeze(0).astype(np.uint8), cmap="gray")
-            self.axs.set_title(f'env: {0}')
-            self.axs.tick_params(top=False,
-            bottom=False,
-            left=False,
-            right=False,
-            labelleft=False,
-            labelbottom=False)
+            # custom rendering method 1 (slower than method 2 below):
+            # self.axs.imshow(state[0].squeeze(0).astype(np.uint8), cmap="gray")
+            # self.axs.set_title(f'env: {0}')
+            # self.axs.tick_params(top=False,
+            # bottom=False,
+            # left=False,
+            # right=False,
+            # labelleft=False,
+            # labelbottom=False)
+
+            # custom rendering method 2 (faster than method 1 above):
+            if hasattr(self, 'ax') == False:
+                plt.ion()
+                self.ax = plt.imshow(state[0].squeeze(0).astype(np.uint8), cmap='gray')
+            else:
+                self.ax.set_data(state[0].squeeze(0).astype(np.uint8))
+                plt.xticks([])
+                plt.yticks([])
+                plt.axis
+                # plt.pause(1/60)
+
 
         plt.pause(1/60)
 
