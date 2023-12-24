@@ -1,0 +1,217 @@
+virtual memory'miz fazla --> htop (VIRT)
+
+exps:
+64 processli devam
+--
+1)düz ppo montezuma
+2) intrinsic loss'u 1000 yerine 100 e bölmeli original+modified+RND
+3) kızın 32 rnd arkada devam
+4) 16 processlie montezuma dursun
+5,6) intrinsic loss'u 1000 yerine 10 e bölmeli original+modified+RND
+* boş kalana da düz ppo montezuma gerisi
+
+2000 step'te haber 
+
+===== Summary:
+Montezuma 64 process (detaylı loglamayı da kapat bence daha hızlı trainleyebilir !!!):
+	1) Just PPO  
+	2,3) intrinsic loss'u 1000 yerine 100'e bolmeli -> (original_rnd + modified_rnd) = [IntCoef = 0.1] (Note original IntCoef=1)
+	4,5) intrinsic loss'u 1000 yerine 10'a bolmeli -> (original_rnd + modified_rnd) = [IntCoef = 0.01] (Note original IntCoef=1)
+	-
+	6) kızın 32 process'li rnd'si arkada devam etsin.
+	7) bizim 64 process montezuma devam etsin. [tb_logs/montezuma_originalRND00_parallel_exp2]
+	8) bizim 16 process montezuma devam etsin. [tb_logs/montezuma_originalRND00_parallel_exp4]
+	-
+	7,8) boş kalana da düz ppo montezuma gerisi farklı process sayılarıyla dene (max alabildiğin process spawn sayıyısını arıyoruz)
+		or
+	     scalene ve torchprofiler runla
+	        or
+	     rdzv-endpoint'li bir çalışacak mı diye 64 process'li 2 node da deneybillirsin belki ?
+	
+	= 2000 step'de Barış hocaya sonuçları bildir (~Çarşamba sabahı)
+====
+
+default Coefficients:
+** critic_loss = critic_ext_loss + critic_int_loss **
+*** loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss ***
+
+	*) self.ent_coef --> 0.01 (config'de bile değil direk default bu bununla oynama bence) 
+	*) self.representation_loss_coef --> 1.0 (Barlow ve BYOL'da da aynı)
+	
+*** total_adv = int_adv * int_coef + ext_adv * ext_coef ***
+	*) IntCoef = 1
+	*) ExtCoef = 2
+
+
+self.ent_coef --> 0.01 (config'de bile değil direk default bu bununla oynama bence)
+
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+Barış hoca 2. görüşme:
+
+modified RND 128'den 1024 feature embedding e çıkar 
+original RND intrinsicleri 10, 100, 1000 katına çıkar
+düz ppo devam
+16 ve 64 processli montezuma original rnd'ler devam
+
+rnd ve latent rnd (NOTE: latent dediği modified RND)
+1,2) latent rnd 1024 1 ve 1000 kat
+
+modified RND 256 feature size'ı 10
+
+============= Summary:
+	1,2,3) original RND intrinsic coefficient'ları 10, 100, ve 1000 katına çıkar = [IntCoef = 10], [IntCoef = 100], [IntCoef = 1000] {Montezuma_originalRND00_intCoef10_exp1_7day_batchjob, Montezuma_originalRND00_intCoef100_exp2_7day_batchjob, Montezuma_originalRND00_intCoef1000_exp3_7day_batchjob}
+	4,5) modified RND 128'den 1024 feature embedding'e çıkar: intrinsic coefficient'ları 1 ve 1000 ile dene = [IntCoef = 1], [IntCoef = 1000] {can_montezuma_modifiedRND00_intCoef1_1024embed_exp4_submit, can_montezuma_modifiedRND00_intCoef1000_1024embed_exp5_submit}
+	-- (devam ettirilenler)
+	6) JustPPO training'i devam etsin {Montezuma_JustPPO00_exp1_7day_batchjob}
+	7,8) 64 ve 32 process'li original RND training'leri devam etsin {Montezuma_originalRND00_parallel_exp2_7day_batchjob, Montezuma_originalRND00_parallel_exp4_7day_batchjob}
+	
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+Barış hoca 3. görüşme:
+cpu ile clusterda bir dene takılıcak mı (--mem'i de arttır baya bir)
+latent size'ları varied modified_rnd + modified_rdn_BYOL
+
+	1) 1024 embedding size, JUST_PPO {montezuma_JustPPO00_1024embed_exp1}
+	2) 1024 embedding size, PPO with BYOL {montezuma_PPOwithBYOL00_1024embed_exp2}
+	3) 1024 embedding size, modiifed_RND with BYOL {montezuma_modifiedRNDwithBYOL00_intCoef1000_1024embed_exp3}
+	4) 1024 embedding size, original_RND with BYOL {montezuma_originalRNDwithBYOL00_intCoef1_1024embed_exp4}
+	-- (devam ettirilenler)
+	5) JustPPO (128 embed) training'i devam etsin {Montezuma_JustPPO00_exp1_7day_batchjob}
+	6, 7) 64 ve 32 process'li original RND training'leri devam etsin {Montezuma_originalRND00_parallel_exp2_7day_batchjob, Montezuma_originalRND00_parallel_exp4_7day_batchjob}
+	8) modified RND 1024 feature embedding'e çıkarılan devam etsin {Montezuma_modifiedRND00_intCoef1000_1024embed_exp5_7day_batchjob}
+
+-
+Future dir:
+RND ve learned network backbone paylaşsın !
+
+wandb:
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --use_wandb --wandb_api_key=d012c9698bf568b1807b1cfe9ed56611311573e8
+
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+/exp04/*:
+BYOL loss'u ratio olarak RL'in 0.1'ine indir. Bu yönde trainingler başlat.
+
+experiments:
+	1) BYOL with self.representation_loss_coef = 1, int_coeff=1000 {Montezuma_modifiedRNDwithBYOL00_representationCoef1_intCoef1000_1024embed_exp1_7day_batchjob}
+	2) BYOL with self.representation_loss_coef = 0.1, int_coeff=1000 {Montezuma_modifiedRNDwithBYOL00_representationCoef01_intCoef1000_1024embed_exp2_7day_batchjob}
+	3) BYOL with self.representation_loss_coef = 0.01, int_coeff=1000 {Montezuma_modifiedRNDwithBYOL00_representationCoef001_intCoef1000_1024embed_exp3_7day_batchjob}
+	4) BYOL with self.representation_loss_coef = 0.001, int_coeff=1000 {Montezuma_modifiedRNDwithBYOL00_representationCoef0001_intCoef1000_1024embed_exp4_7day_batchjob}
+	5) BYOL with self.representation_loss_coef = 0.0001, int_coeff=1000 {Montezuma_modifiedRNDwithBYOL00_representationCoef00001_intCoef1000_1024embed_exp5_7day_batchjob}
+	6) BYOL with self.representation_loss_coef = 10, int_coeff=1000 {Montezuma_modifiedRNDwithBYOL00_representationCoef10_intCoef1000_1024embed_exp6_7day_batchjob}
+	7) BYOL with self.representation_loss_coef = 100, int_coeff=1000 {Montezuma_modifiedRNDwithBYOL00_representationCoef100_intCoef1000_1024embed_exp7_7day_batchjob}
+	8) -
+
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+/exp05/*:
+Barlow loss'u ratio olarak RL'in 0.1'ine indir. Bu yönde trainingler başlat. (Bir önceki experiment'ları Barlow-için run'la).
+Bir de modified_RND with no Representation Learning run'la.
+experiments:
+	1) Barlow with self.representation_loss_coef = 1, int_coeff=1000 {Montezuma_modifiedRNDwithBarlow00_representationCoef1_intCoef1000_1024embed_exp1_7day_batchjob}
+	2) Barlow with self.representation_loss_coef = 0.1, int_coeff=1000 {Montezuma_modifiedRNDwithBarlow00_representationCoef01_intCoef1000_1024embed_exp2_7day_batchjob}
+	3) Barlow with self.representation_loss_coef = 0.01, int_coeff=1000 {Montezuma_modifiedRNDwithBarlow00_representationCoef001_intCoef1000_1024embed_exp3_7day_batchjob}
+	4) Barlow with self.representation_loss_coef = 0.001, int_coeff=1000 {Montezuma_modifiedRNDwithBarlow00_representationCoef0001_intCoef1000_1024embed_exp4_7day_batchjob}
+	5) Barlow with self.representation_loss_coef = 0.0001, int_coeff=1000 {Montezuma_modifiedRNDwithBarlow00_representationCoef00001_intCoef1000_1024embed_exp5_7day_batchjob}
+	6) Barlow with self.representation_loss_coef = 10, int_coeff=1000 {Montezuma_modifiedRNDwithBarlow00_representationCoef10_intCoef1000_1024embed_exp6_7day_batchjob}
+	7) Barlow with self.representation_loss_coef = 100, int_coeff=1000 {Montezuma_modifiedRNDwithBarlow00_representationCoef100_intCoef1000_1024embed_exp7_7day_batchjob}
+	8) modified_RND with no representation Learning method 
+{montezuma_modifiedRNDwithNoSSL00_intCoef1000_1024embed_exp8_7day_batchjob} (IPTAL)
+
+
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+/exp06/*:
+HEPSINI 
+256, 1024 (hidden_sizes)
+
+baseline sonuçlarını alalım:
+1) düz ppo
+2) original RND
+3) modified RND
+
+hidden_size:1024'ile ilk
+4,5) SSL+PPO vs PPO
+---------------------------------
+
+****************** EXPERIMENTS SUMMARY:
+general configs: representationCoef001 (0.01), intCoef1000 (same as before and what worked best so far)
+1) Just_PPO 1024 hidden_size {Montezuma_JustPPO00_1024embed_exp1_7day_batchjob}
+2) original_RND 1024 hidden_size {Montezuma_originalRND00_1024embed_exp2_7day_batchjob}
+3) modified_RND (BYOL) 1024 hidden_size {Montezuma_modifiedRNDwithBYOL00_1024embed_exp3_7day_batchjob}
+4) modified_RND (Barlow) 1024 hidden_size {Montezuma_modifiedRNDwithBarlow00_1024embed_exp4_7day_batchjob}
+
+5) Just_PPO 256  hidden_size {Montezuma_JustPPO00_256embed_exp5_7day_batchjob}
+6) original_RND 256 hidden_size {Montezuma_originalRND00_256embed_exp6_7day_batchjob}
+7) modified_RND (BYOL) 256 hidden_size {Montezuma_modifiedRNDwithBYOL00_256embed_exp7_7day_batchjob}
+8) modified_RND (Barlow) 256 hidden_size {Montezuma_modifiedRNDwithBarlow00_256embed_exp8_7day_batchjob}
+
+
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+/exp07/*:
+1) original RND 1024_embed değil çakma original_RDN kodundaki boyutla başlat ! 
+2,3,4,5, 6) PPO+ BYOL (256_embed, PPO+Barlow (256_embed), representation_coef tune'lamalı 2 şer tane at
+RND boyutunu arttır
+--
+Atari, control task --> PPO
+online RL + representation learning
+
+--
+original RND github çakma koduna "num rooms found log ekle".
+6) bunu çalıştır
+
+****************** EXPERIMENTS SUMMARY:
+1) original_RND paper'daki network architecture'ı ile runla {Montezuma_originalRND00_paperArchitecture_exp1_7day_batchjob}
+2,3) PPO+BYOL 256_embed representation_coef: 1, 10 {Montezuma_PPOwithBYOL00_256embed_representationCoef1_exp2_7day_batchjob, Montezuma_PPOwithBYOL00_256embed_representationCoef10_exp3_7day_batchjob}
+4,5) PPO+Barlow 256_embed representation_coef: 1, 10 {Montezuma_PPOwithBarlow00_256embed_representationCoef1_exp4_7day_batchjob, Montezuma_PPOwithBarlow00_256embed_representationCoef10_exp5_7day_batchjob}
+
+6) original RND github çakma koduna "num rooms found log ekle" ve runla. Bu loglara tb den bakmak lazım
+
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+/exp08/*:
+1) original RND jcwleo original_RND kodundaki parametreler ve architecture ile runla {Montezuma_originalRND01_paperArchitecture_exp1_7day_batchjob}
+
+
+---------
+=============================================================================================
+*********************************************************************************************
+=============================================================================================
+---------
+
+-
+Future dir:
+*)90deg projection of gradients from RL loss & repr_loss for better tuning: Representation loss'un gradientlarını ve RL'in gradientlarını uzayda iki vector olarak düşün. Eğer iki vector arasındaki derece fark'ı 90 dereceden fazla ise bu iki vektor iki farklı yöne çekiyor ve birbirlerine ters yönlerde update'ler yaparak training'i unstable hale getiriyorlar. Biz bu iki loss'un gradientlarının arasındaki fark'ın 90 dereceyi geçtiği yerlerde vector'ları 90 derece olacak şekilde project edersek o zaman birbirlerine ters yönlere çekmezler update'i. Böyle bir update yöntemi propose edip deneyebiliriz.
+*)RND ve learned network backbone paylaşsın !
+-
+Optional dir:
+        (PPO_backbone + SSL) ama RND image input üzerinden(original_RND gibi): PPO'nun backbone'u RND ile share edilmiyor.
+        *) original_RND + PPO + SSL
+        *) 2 step training (i.e. SSL pretraining mode)
+--
+
+
+

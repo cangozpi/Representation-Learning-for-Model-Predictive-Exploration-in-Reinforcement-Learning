@@ -88,120 +88,33 @@ class CnnActorCriticNetwork(nn.Module):
             linear = nn.Linear
 
         # --------------- original paper's architecture below:
-        # self.feature = nn.Sequential(
-        #     nn.Conv2d(
-        #         in_channels=4, # TODO: this equals StateStackSize
-        #         out_channels=32,
-        #         kernel_size=8,
-        #         stride=4),
-        #     nn.ReLU(),
-        #     nn.Conv2d(
-        #         in_channels=32,
-        #         out_channels=64,
-        #         kernel_size=4,
-        #         stride=2),
-        #     nn.ReLU(),
-        #     nn.Conv2d(
-        #         in_channels=64,
-        #         out_channels=64,
-        #         kernel_size=3,
-        #         stride=1),
-        #     nn.ReLU(),
-        #     Flatten(),
-        #     linear(
-        #         7 * 7 * 64,
-        #         256),
-        #     nn.ReLU(),
-        #     linear(
-        #         256,
-        #         CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # TODO: set extracted_feature_embedding_dim to 448 to match original RND paper !
-        #     nn.ReLU()
-        # )
-
-        # self.actor = nn.Sequential(
-        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
-        #     nn.ReLU(),
-        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size)
-        # )
-
-        # self.extra_layer = nn.Sequential(
-        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
-        #     nn.ReLU()
-        # )
-
-        # self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
-        # self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
-
-        # for p in self.modules():
-        #     if isinstance(p, nn.Conv2d):
-        #         init.orthogonal_(p.weight, np.sqrt(2))
-        #         p.bias.data.zero_()
-
-        #     if isinstance(p, nn.Linear):
-        #         init.orthogonal_(p.weight, np.sqrt(2))
-        #         p.bias.data.zero_()
-
-        # init.orthogonal_(self.critic_ext.weight, 0.01)
-        # self.critic_ext.bias.data.zero_()
-
-        # init.orthogonal_(self.critic_int.weight, 0.01)
-        # self.critic_int.bias.data.zero_()
-
-        # for i in range(len(self.actor)):
-        #     if type(self.actor[i]) == nn.Linear:
-        #         init.orthogonal_(self.actor[i].weight, 0.01)
-        #         self.actor[i].bias.data.zero_()
-
-        # for i in range(len(self.extra_layer)):
-        #     if type(self.extra_layer[i]) == nn.Linear:
-        #         init.orthogonal_(self.extra_layer[i].weight, 0.1)
-        #         self.extra_layer[i].bias.data.zero_()
-
-        
-
-        # --------------- my architecture below:
         self.feature = nn.Sequential(
             nn.Conv2d(
                 in_channels=4, # TODO: this equals StateStackSize
-                out_channels=8,
-                kernel_size=7,
+                out_channels=32,
+                kernel_size=8,
+                stride=4),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=32,
+                out_channels=64,
+                kernel_size=4,
                 stride=2),
             nn.ReLU(),
             nn.Conv2d(
-                in_channels=8,
-                out_channels=8,
-                kernel_size=5,
-                stride=2),
-            nn.ReLU(),
-            nn.Conv2d(
-                in_channels=8,
-                out_channels=8,
+                in_channels=64,
+                out_channels=64,
                 kernel_size=3,
                 stride=1),
             nn.ReLU(),
             Flatten(),
-            # -- old smaller layers below:
-            # linear(
-            #     # 7 * 7 * 64, #TOOD: ?
-            #     # 23104 // 2,
-            #     # 200,
-            #     2048,
-            #     64),
-            # nn.ReLU(),
-            # linear(
-            #     64,
-            #     32),
-            # ---
             linear(
-                # 7 * 7 * 64, #TOOD: ?
-                # 23104 // 2,
-                # 200,
-                2048,
+                7 * 7 * 64,
                 256),
             nn.ReLU(),
             linear(
                 256,
-                CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 128
+                CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # TODO: set extracted_feature_embedding_dim to 448 to match original RND paper !
             nn.ReLU()
         )
 
@@ -218,6 +131,93 @@ class CnnActorCriticNetwork(nn.Module):
 
         self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
         self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
+
+        for p in self.modules():
+            if isinstance(p, nn.Conv2d):
+                init.orthogonal_(p.weight, np.sqrt(2))
+                p.bias.data.zero_()
+
+            if isinstance(p, nn.Linear):
+                init.orthogonal_(p.weight, np.sqrt(2))
+                p.bias.data.zero_()
+
+        init.orthogonal_(self.critic_ext.weight, 0.01)
+        self.critic_ext.bias.data.zero_()
+
+        init.orthogonal_(self.critic_int.weight, 0.01)
+        self.critic_int.bias.data.zero_()
+
+        for i in range(len(self.actor)):
+            if type(self.actor[i]) == nn.Linear:
+                init.orthogonal_(self.actor[i].weight, 0.01)
+                self.actor[i].bias.data.zero_()
+
+        for i in range(len(self.extra_layer)):
+            if type(self.extra_layer[i]) == nn.Linear:
+                init.orthogonal_(self.extra_layer[i].weight, 0.1)
+                self.extra_layer[i].bias.data.zero_()
+
+        
+
+        # --------------- my architecture below:
+        # self.feature = nn.Sequential(
+        #     nn.Conv2d(
+        #         in_channels=4, # TODO: this equals StateStackSize
+        #         out_channels=8,
+        #         kernel_size=7,
+        #         stride=2),
+        #     nn.ReLU(),
+        #     nn.Conv2d(
+        #         in_channels=8,
+        #         out_channels=8,
+        #         kernel_size=5,
+        #         stride=2),
+        #     nn.ReLU(),
+        #     nn.Conv2d(
+        #         in_channels=8,
+        #         out_channels=8,
+        #         kernel_size=3,
+        #         stride=1),
+        #     nn.ReLU(),
+        #     Flatten(),
+        #     # -- old smaller layers below:
+        #     # linear(
+        #     #     # 7 * 7 * 64, #TOOD: ?
+        #     #     # 23104 // 2,
+        #     #     # 200,
+        #     #     2048,
+        #     #     64),
+        #     # nn.ReLU(),
+        #     # linear(
+        #     #     64,
+        #     #     32),
+        #     # ---
+        #     linear(
+        #         # 7 * 7 * 64, #TOOD: ?
+        #         # 23104 // 2,
+        #         # 200,
+        #         2048,
+        #         256),
+        #     nn.ReLU(),
+        #     linear(
+        #         256,
+        #         CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 128
+        #     nn.ReLU()
+        # )
+
+        # self.actor = nn.Sequential(
+        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
+        #     nn.ReLU(),
+        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size)
+        # )
+
+        # self.extra_layer = nn.Sequential(
+        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
+        #     nn.ReLU()
+        # )
+
+        # self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
+        # self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
         
 
     def forward(self, state):

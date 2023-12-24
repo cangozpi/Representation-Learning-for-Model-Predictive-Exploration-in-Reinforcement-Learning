@@ -251,7 +251,8 @@ def main(args):
         # Compute normalize obs, compute intrinsic rewards and clip them (note that: total reward = int reward + ext reward)
         if train_method == 'original_RND':
             intrinsic_reward = agent.compute_intrinsic_reward(
-                ((next_obs.cpu().numpy() - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
+                ((next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
+                # ((next_obs.cpu().numpy() - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
         elif train_method == 'modified_RND':
             with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
                 extracted_feature_embeddings = agent.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs=1, feature_embeddings_dim]
