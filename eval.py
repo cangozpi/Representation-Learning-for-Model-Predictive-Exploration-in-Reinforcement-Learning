@@ -208,7 +208,7 @@ def main(args):
 
         next_states, rewards, dones, next_obs = [], [], [], []
         for env_idx, parent_conn in enumerate(env_worker_parent_conns):
-            s, r, d, trun = parent_conn.recv()
+            s, r, d, trun, visited_rooms = parent_conn.recv()
             assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
             assert type(r) == float
             assert type(d) == bool

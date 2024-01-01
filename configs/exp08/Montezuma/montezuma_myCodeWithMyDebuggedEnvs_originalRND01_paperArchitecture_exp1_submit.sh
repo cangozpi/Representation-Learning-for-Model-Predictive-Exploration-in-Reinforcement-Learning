@@ -22,7 +22,7 @@
 
 # -= Resources =-
 #
-#SBATCH --job-name=Montezuma_originalRND01_paperArchitecture_exp1_7day_batchjob
+#SBATCH --job-name=Montezuma_myCodeWithMyDebuggedEnvs_originalRND01_paperArchitecture_exp1_7day_batchjob
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=30
@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp08/Montezuma/config_originalRND01_paperArchitecture.conf --log_name=montezuma_originalRND01_paperArchitecture_exp1 --save_model_path=checkpoints/exp08/Montezuma/montezuma_originalRND01_paperArchitecture_exp1.ckpt --use_wandb --wandb_api_key=d012c9698bf568b1807b1cfe9ed56611311573e8
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp08/Montezuma/config_originalRND01_paperArchitecture.conf --log_name=montezuma_myCodeWithMyDebuggedEnvs_originalRND01_paperArchitecture_exp1 --save_model_path=checkpoints/exp08/Montezuma/montezuma_myCodeWithMyDebuggedEnvs_originalRND01_paperArchitecture_exp1.ckpt --use_wandb --wandb_api_key=d012c9698bf568b1807b1cfe9ed56611311573e8

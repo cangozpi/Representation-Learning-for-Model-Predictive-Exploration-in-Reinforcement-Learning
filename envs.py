@@ -208,7 +208,9 @@ class ResizeAndGrayScaleWrapper(gym.Wrapper):
         convert to grayscale and rescale the image
         """
         assert X.shape[-1] == 3 # [H, W, 3]
-        x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
+        # x = np.array(Image.fromarray(X).convert('L').resize((self.w, self.h))).astype('float32')
+        X = np.array(Image.fromarray(X).convert('L')).astype('float32')
+        x = cv2.resize(X, (self.h, self.w))
         return x
 
 
@@ -261,10 +263,13 @@ class AtariEnvironment(Environment):
         self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
 
         self.env = gym.make(env_id, render_mode="rgb_array" if is_render else None)
+        # if sticky_action:
+        #     self.env = StickyActionWrapper(self.env, p)
+        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
         if sticky_action:
             self.env = StickyActionWrapper(self.env, p)
         self.env = ResizeAndGrayScaleWrapper(self.env, h, w)
-        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
+        # self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
         self.env = FrameStackWrapper(self.env, history_size)
         self.env = MaxStepPerEpisodeWrapper(self.env, max_step_per_episode)
         self.env = Monitor(self.env)
@@ -315,7 +320,7 @@ class AtariEnvironment(Environment):
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            self.child_conn.send([state, reward, done, trun])
+            self.child_conn.send([state, reward, done, trun, info.get("episode", {}).get("visited_rooms", {})])
 
             if done or trun:
                 if 'Montezuma' in self.env_id:

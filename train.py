@@ -181,6 +181,7 @@ def main(args):
     episode_lengths = deque([], maxlen=100)
     if 'Montezuma' in env_id:
         number_of_visited_rooms = deque([], maxlen=100)
+    total_num_visited_rooms = set() # id of every room visited so far in MontezumaRevenge
 
     if is_load_model:
         logger.log_msg_to_both_console_and_file(f'loading from checkpoint: {load_ckpt_path}', only_rank_0=True)
@@ -219,6 +220,7 @@ def main(args):
         best_SSL_evaluation_epoch_loss  = load_checkpoint['best_SSL_evaluation_epoch_loss']
         if 'Montezuma' in env_id:
             number_of_visited_rooms = load_checkpoint['visited_rooms']
+            total_num_visited_rooms = load_checkpoint['total_num_visited_rooms']
         logger.tb_global_steps = load_checkpoint['logger.tb_global_steps']
 
         logger.log_msg_to_both_console_and_file('loading finished!', only_rank_0=True)
@@ -311,7 +313,7 @@ def main(args):
                 
                 next_states = []
                 for env_idx, parent_conn in enumerate(env_worker_parent_conns):
-                    s, r, d, trun = parent_conn.recv()
+                    s, r, d, trun, visited_rooms = parent_conn.recv()
                     assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
                     assert type(r) == float
                     assert type(d) == bool
@@ -467,7 +469,7 @@ def main(args):
                 parent_conn.send(action)
                 
             for env_idx, parent_conn in enumerate(env_worker_parent_conns):
-                s, r, d, trun = parent_conn.recv()
+                s, r, d, trun, visited_rooms = parent_conn.recv()
                 assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
                 assert type(r) == float
                 assert type(d) == bool
@@ -545,7 +547,7 @@ def main(args):
 
             next_states, rewards, dones, next_obs = [], [], [], []
             for env_idx, parent_conn in enumerate(env_worker_parent_conns):
-                s, r, d, trun = parent_conn.recv()
+                s, r, d, trun, visited_rooms = parent_conn.recv()
                 assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
                 assert type(r) == float
                 assert type(d) == bool
@@ -554,6 +556,7 @@ def main(args):
                 next_states.append(s)
                 rewards.append(r)
                 dones.append(d) # --> [num_env]
+                total_num_visited_rooms = total_num_visited_rooms.union(visited_rooms)
                 if train_method == 'original_RND':
                     next_obs.append(s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size])) # [1, input_size, input_size]
                 elif train_method == 'modified_RND':
@@ -569,7 +572,7 @@ def main(args):
                     episode_lengths.append(info['episode']['l'])
                     # Logging:
                     if 'Montezuma' in env_id:
-                        logger.log_msg_to_both_console_and_file(f'[Rank: {GLOBAL_RANK}, env: {env_idx}] episode: {info["episode"]["num_finished_episodes"]}, step: {info["episode"]["l"]}, undiscounted_return: {info["episode"]["undiscounted_episode_return"]}, moving_average_undiscounted_return: {np.mean(info["episode"]["undiscounted_episode_return"])}, visited_rooms: {info["episode"]["visited_rooms"]}')
+                        logger.log_msg_to_both_console_and_file(f'[Rank: {GLOBAL_RANK}, env: {env_idx}] episode: {info["episode"]["num_finished_episodes"]}, step: {info["episode"]["l"]}, undiscounted_return: {info["episode"]["undiscounted_episode_return"]}, moving_average_undiscounted_return: {np.mean(info["episode"]["undiscounted_episode_return"])}, visited_rooms: {info["episode"]["visited_rooms"]}, total_num_visited_rooms: {total_num_visited_rooms}')
                     else:
                         logger.log_msg_to_both_console_and_file(f'[Rank: {GLOBAL_RANK}, env: {env_idx} ] episode: {info["episode"]["num_finished_episodes"]}, step: {info["episode"]["l"]}, undiscounted_return: {info["episode"]["undiscounted_episode_return"]}, moving_average_undiscounted_return: {np.mean(info["episode"]["undiscounted_episode_return"])}')
 
@@ -709,7 +712,8 @@ def main(args):
             if train_method in ['original_RND', 'modified_RND']:
                 parameterUpdates_log_dict = {
                     **parameterUpdates_log_dict,
-                    'data/Mean of rollout rewards (intrinsic) vs Parameter updates': np.mean(total_int_reward)
+                    'data/Mean of rollout rewards (intrinsic) vs Parameter updates': np.mean(total_int_reward),
+                    'data/total_num_visited_rooms': np.sum(len(total_num_visited_rooms))
                 } 
             if len(episode_lengths) > 0: # check if any episode has been completed yet
                 parameterUpdates_log_dict = {
@@ -733,6 +737,7 @@ def main(args):
         logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (extrinsic) vs Parameter updates', np.mean(total_reward), global_update, only_rank_0=True)
         if train_method in ['original_RND', 'modified_RND']:
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
+            logger.log_scalar_to_tb_with_step('data/total_num_visited_rooms', np.sum(len(total_num_visited_rooms)), global_update, only_rank_0=True)
         if len(episode_lengths) > 0: # check if any episode has been completed yet
             logger.log_scalar_to_tb_with_step('data/Mean undiscounted episodic return (over last 100 episodes) (extrinsic) vs Parameter updates', np.mean(undiscounted_episode_return), global_update, only_rank_0=True)
             logger.log_scalar_to_tb_with_step('data/Mean episode lengths (over last 100 episodes) vs Parameter updates', np.mean(episode_lengths), global_update, only_rank_0=True)
@@ -742,7 +747,7 @@ def main(args):
 
         # Save checkpoint
         save_ckpt(global_step, num_env_workers, num_step, default_config, highest_mean_total_reward, total_reward, highest_mean_undiscounted_episode_return, undiscounted_episode_return, GLOBAL_RANK, \
-            logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, number_of_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, float("inf"), -1)
+            logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, number_of_visited_rooms, total_num_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, float("inf"), -1)
 
         # update best scores:
         if highest_mean_undiscounted_episode_return < np.mean(undiscounted_episode_return): # checkpointing the best performing agent so far for the metric mean undiscounted episode return
@@ -780,7 +785,7 @@ def main(args):
 
 # Save checkpoint
 def save_ckpt(global_step, num_env_workers, num_step, default_config, highest_mean_total_reward, total_reward, highest_mean_undiscounted_episode_return, undiscounted_episode_return, GLOBAL_RANK, \
-    logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, number_of_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, SSL_pretraining_epoch):
+    logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, number_of_visited_rooms, total_num_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, SSL_pretraining_epoch):
     if (
         (global_step % (num_env_workers * num_step * int(default_config["saveCkptEvery"])) == 0) # scheduled checkpointing time
         or
@@ -852,6 +857,7 @@ def save_ckpt(global_step, num_env_workers, num_step, default_config, highest_me
         }
         if 'Montezuma' in env_id:
             ckpt_dict.update(visited_rooms=number_of_visited_rooms)
+            ckpt_dict.update(total_num_visited_rooms=total_num_visited_rooms)
                 
         for p in ckpt_paths:
             os.makedirs('/'.join(p.split('/')[:-1]), exist_ok=True)
