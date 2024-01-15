@@ -713,7 +713,6 @@ def main(args):
                 parameterUpdates_log_dict = {
                     **parameterUpdates_log_dict,
                     'data/Mean of rollout rewards (intrinsic) vs Parameter updates': np.mean(total_int_reward),
-                    'data/total_num_visited_rooms': np.sum(len(total_num_visited_rooms))
                 } 
             if len(episode_lengths) > 0: # check if any episode has been completed yet
                 parameterUpdates_log_dict = {
@@ -724,7 +723,8 @@ def main(args):
                 if 'Montezuma' in env_id:
                     parameterUpdates_log_dict = {
                         **parameterUpdates_log_dict,
-                        'data/Mean number of rooms found (over last 100 episodes) vs Parameter updates': np.mean(number_of_visited_rooms)
+                        'data/Mean number of rooms found (over last 100 episodes) vs Parameter updates': np.mean(number_of_visited_rooms),
+                        'data/total_num_visited_rooms': np.sum(len(total_num_visited_rooms))
                     } 
         
             parameterUpdates_log_dict = {f'wandb_{k}': v for (k, v) in parameterUpdates_log_dict.items()}
@@ -737,12 +737,12 @@ def main(args):
         logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (extrinsic) vs Parameter updates', np.mean(total_reward), global_update, only_rank_0=True)
         if train_method in ['original_RND', 'modified_RND']:
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
-            logger.log_scalar_to_tb_with_step('data/total_num_visited_rooms', np.sum(len(total_num_visited_rooms)), global_update, only_rank_0=True)
         if len(episode_lengths) > 0: # check if any episode has been completed yet
             logger.log_scalar_to_tb_with_step('data/Mean undiscounted episodic return (over last 100 episodes) (extrinsic) vs Parameter updates', np.mean(undiscounted_episode_return), global_update, only_rank_0=True)
             logger.log_scalar_to_tb_with_step('data/Mean episode lengths (over last 100 episodes) vs Parameter updates', np.mean(episode_lengths), global_update, only_rank_0=True)
             if 'Montezuma' in env_id:
                 logger.log_scalar_to_tb_with_step('data/Mean number of rooms found (over last 100 episodes) vs Parameter updates', np.mean(number_of_visited_rooms), global_update, only_rank_0=True)
+                logger.log_scalar_to_tb_with_step('data/total_num_visited_rooms', np.sum(len(total_num_visited_rooms)), global_update, only_rank_0=True)
 
 
         # Save checkpoint
