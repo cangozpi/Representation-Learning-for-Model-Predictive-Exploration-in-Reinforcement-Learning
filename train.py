@@ -171,6 +171,7 @@ def main(args):
         only_rank_0=True)
 
     agent.add_tb_graph(batch_size, stateStackSize, input_size)
+    agent.setup_gradient_projection() # Note that doing this before calling agent.add_tb_graph() would raise an error
 
     if (default_config.getboolean('verbose_logging') == True) and (logger.use_wandb == True): # Log gradients and parameters of the model using wandb
         wandb.watch(agent, log_freq=1, log_graph=True, log='all')

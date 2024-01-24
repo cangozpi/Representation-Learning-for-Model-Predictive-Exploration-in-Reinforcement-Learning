@@ -18,6 +18,7 @@ import torch.profiler
 from torch.profiler import ProfilerActivity
 from dist_utils import get_dist_info
 from config import args
+from math import radians
 
 import wandb
 
@@ -107,6 +108,7 @@ class RNDAgent(nn.Module):
             self.data_transform = Transform(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
+        self.backbone_model = backbone_model
 
         self.optimizer = optim.Adam(self.get_agent_parameters(), lr=learning_rate)
 
@@ -118,6 +120,57 @@ class RNDAgent(nn.Module):
         
 
         self.freeze_shared_backbone_during_training = default_config.getboolean('freeze_shared_backbone')
+
+    
+
+    def setup_gradient_projection(self):
+        if default_config.getboolean('use_gradient_projection'):
+            global bkwrd_loss_turn 
+            global backbone_model
+            backbone_model = self.backbone_model
+            def gradient_projection_backward_hook(grad):
+                global bkwrd_loss_turn
+                global backbone_model
+                print(f'bkwrd_loss: {bkwrd_loss_turn}, grad.shape: {grad.shape}')
+                if bkwrd_loss_turn == 'loss2': # backward hook is currently called on representation_loss.backward (i.e. loss2.backward)
+                    print("LOSS2 ADAMIM")
+                    if len(grad.shape) == 2: # weight grad
+                        a = backbone_model[-2].weight.grad.data # [d]
+                        b = grad # [d]
+                        a = a.view(-1) # flatten matrix into a vector -> [d]
+                        b = b.view(-1) # flatten matrix into a vector -> [d]
+
+                        # calculate angle btw vectors
+                        cos_theta = torch.dot(a, b) / (torch.norm(a, p='fro') * torch.norm(b, p='fro'))
+                        theta = torch.acos(cos_theta) # in radians
+
+                        if torch.abs(theta) > radians(90): # project gradients if angle is more than 90 degrees
+                            print('larger than 90')
+                            p = a * torch.dot(a, b) / torch.dot(a, a)
+                            e = b - p
+                            e = e.view(*grad.shape) # reshape the projected gradient vector back to original grad's shape (i.e. form matrix from vector)
+                            return e
+
+                    elif len(grad.shape) == 1: # bias grad
+                        a = backbone_model[-2].bias.grad.data # [d]
+                        b = grad # [d]
+
+                        # calculate angle btw vectors
+                        cos_theta = torch.dot(a, b) / (torch.norm(a, p='fro') * torch.norm(b, p='fro'))
+                        theta = torch.acos(cos_theta) # in radians
+
+                        if torch.abs(theta) > radians(90): # project gradients if angle is more than 90 degrees
+                            print('larger than 90')
+                            p = a * torch.dot(a, b) / torch.dot(a, a)
+                            e = b - p
+                            return e
+                    else:
+                        raise Exception('gradient_projection_backward_hook took a grad of unexpected shape')
+
+            self.weight_bkwrd_hook_handle = self.backbone_model[-2].weight.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
+            self.bias_bkwrd_hook_handle = self.backbone_model[-2].bias.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
+
+            self.use_gradient_projection = True
         
     
     def get_agent_parameters(self):
@@ -372,8 +425,22 @@ class RNDAgent(nn.Module):
                 # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
-                loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss
-                loss.backward()
+                if self.use_gradient_projection:
+                    # loss2 (representation loss) will be projected perpendicular to loss1 (ppo loss+rnd_loss, note that rnd_loss does not propagate back to shared PPO backbone):
+                    global bkwrd_loss_turn
+
+                    bkwrd_loss_turn = 'loss1'
+                    loss1 = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss
+                    loss1.backward(retain_graph=True)
+
+                    bkwrd_loss_turn = 'loss2'
+                    loss2 = self.representation_loss_coef * representation_loss
+                    loss2.backward()
+
+                    loss = loss1 + loss2 # for logging total_loss below
+                else:
+                    loss = actor_loss + 0.5 * critic_loss - self.ent_coef * entropy + rnd_loss + self.representation_loss_coef * representation_loss
+                    loss.backward()
 
                 grad_norm_unclipped = global_grad_norm_(self.get_agent_parameters())
                 if default_config.getboolean('UseGradClipping'):
