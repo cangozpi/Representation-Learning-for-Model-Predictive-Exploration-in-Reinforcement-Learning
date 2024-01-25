@@ -85,6 +85,7 @@ class RNDAgent(nn.Module):
         # for BYOL (Bootstrap Your Own Latent)
         if self.representation_lr_method == "BYOL":
             backbone_model = self.model.feature
+            self.backbone_model = backbone_model
             from BYOL import BYOL, Augment
             BYOL_projection_hidden_size = int(default_config['BYOL_projectionHiddenSize'])
             BYOL_projection_size = int(default_config['BYOL_projectionSize'])
@@ -99,6 +100,7 @@ class RNDAgent(nn.Module):
         # for Barlow-Twins
         if self.representation_lr_method == "Barlow-Twins":
             backbone_model = self.model.feature
+            self.backbone_model = backbone_model
             from BarlowTwins import BarlowTwins, Transform
             import json
             projection_sizes = json.loads(default_config['BarlowTwinsProjectionSizes'])
@@ -108,7 +110,6 @@ class RNDAgent(nn.Module):
             self.data_transform = Transform(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
-        self.backbone_model = backbone_model
 
         self.optimizer = optim.Adam(self.get_agent_parameters(), lr=learning_rate)
 
@@ -131,9 +132,9 @@ class RNDAgent(nn.Module):
             def gradient_projection_backward_hook(grad):
                 global bkwrd_loss_turn
                 global backbone_model
-                print(f'bkwrd_loss: {bkwrd_loss_turn}, grad.shape: {grad.shape}')
+                # print(f'bkwrd_loss: {bkwrd_loss_turn}, grad.shape: {grad.shape}')
                 if bkwrd_loss_turn == 'loss2': # backward hook is currently called on representation_loss.backward (i.e. loss2.backward)
-                    print("LOSS2 ADAMIM")
+                    # print("LOSS2 ADAMIM")
                     if len(grad.shape) == 2: # weight grad
                         a = backbone_model[-2].weight.grad.data # [d]
                         b = grad # [d]
@@ -145,7 +146,7 @@ class RNDAgent(nn.Module):
                         theta = torch.acos(cos_theta) # in radians
 
                         if torch.abs(theta) > radians(90): # project gradients if angle is more than 90 degrees
-                            print('larger than 90')
+                            # print('larger than 90')
                             p = a * torch.dot(a, b) / torch.dot(a, a)
                             e = b - p
                             e = e.view(*grad.shape) # reshape the projected gradient vector back to original grad's shape (i.e. form matrix from vector)
@@ -160,7 +161,7 @@ class RNDAgent(nn.Module):
                         theta = torch.acos(cos_theta) # in radians
 
                         if torch.abs(theta) > radians(90): # project gradients if angle is more than 90 degrees
-                            print('larger than 90')
+                            # print('larger than 90')
                             p = a * torch.dot(a, b) / torch.dot(a, a)
                             e = b - p
                             return e
@@ -171,6 +172,9 @@ class RNDAgent(nn.Module):
             self.bias_bkwrd_hook_handle = self.backbone_model[-2].bias.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
 
             self.use_gradient_projection = True
+
+        else:
+            self.use_gradient_projection = False
         
     
     def get_agent_parameters(self):
