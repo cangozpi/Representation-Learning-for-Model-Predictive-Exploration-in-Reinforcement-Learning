@@ -132,7 +132,6 @@ class RNDAgent(nn.Module):
             def gradient_projection_backward_hook(grad):
                 global bkwrd_loss_turn
                 global backbone_model
-                print(f'bkwrd_loss: {bkwrd_loss_turn}, grad.shape: {grad.shape}')
                 if bkwrd_loss_turn == 'loss2': # backward hook is currently called on representation_loss.backward (i.e. loss2.backward)
                     if len(grad.shape) == 2: # weight grad
                         a = backbone_model[-2].weight.grad.data # [d]
@@ -144,8 +143,8 @@ class RNDAgent(nn.Module):
                         cos_theta = torch.dot(a, b) / (torch.norm(a, p='fro') * torch.norm(b, p='fro'))
                         theta = torch.acos(cos_theta) # in radians
 
+                        # if cos_theta < 0:
                         if  (radians(270) > torch.abs(theta) > radians(90)) or (radians(-90) > torch.abs(theta) > radians(-270)): # project gradients if angle is more than 90 degrees
-                            print('larger than 90')
                             p = a * torch.dot(a, b) / torch.dot(a, a)
                             e = b - p
                             e = e.view(*grad.shape) # reshape the projected gradient vector back to original grad's shape (i.e. form matrix from vector)
@@ -181,8 +180,8 @@ class RNDAgent(nn.Module):
                     cos_theta = torch.dot(a, b) / (torch.norm(a, p='fro') * torch.norm(b, p='fro'))
                     theta = torch.acos(cos_theta) # in radians
 
+                    # if cos_theta < 0:
                     if  (radians(270) > torch.abs(theta) > radians(90)) or (radians(-90) > torch.abs(theta) > radians(-270)): # project gradients if angle is more than 90 degrees
-                        print('larger than 90')
                         p = a * torch.dot(a, b) / torch.dot(a, a)
                         e = b - p
                         e = e.view(*grad_input[0].shape) # reshape the projected gradient vector back to original grad's shape (i.e. form matrix from vector)
