@@ -132,9 +132,8 @@ class RNDAgent(nn.Module):
             def gradient_projection_backward_hook(grad):
                 global bkwrd_loss_turn
                 global backbone_model
-                # print(f'bkwrd_loss: {bkwrd_loss_turn}, grad.shape: {grad.shape}')
+                print(f'bkwrd_loss: {bkwrd_loss_turn}, grad.shape: {grad.shape}')
                 if bkwrd_loss_turn == 'loss2': # backward hook is currently called on representation_loss.backward (i.e. loss2.backward)
-                    # print("LOSS2 ADAMIM")
                     if len(grad.shape) == 2: # weight grad
                         a = backbone_model[-2].weight.grad.data # [d]
                         b = grad # [d]
@@ -145,8 +144,8 @@ class RNDAgent(nn.Module):
                         cos_theta = torch.dot(a, b) / (torch.norm(a, p='fro') * torch.norm(b, p='fro'))
                         theta = torch.acos(cos_theta) # in radians
 
-                        if torch.abs(theta) > radians(90): # project gradients if angle is more than 90 degrees
-                            # print('larger than 90')
+                        if  (radians(270) > torch.abs(theta) > radians(90)) or (radians(-90) > torch.abs(theta) > radians(-270)): # project gradients if angle is more than 90 degrees
+                            print('larger than 90')
                             p = a * torch.dot(a, b) / torch.dot(a, a)
                             e = b - p
                             e = e.view(*grad.shape) # reshape the projected gradient vector back to original grad's shape (i.e. form matrix from vector)
@@ -167,9 +166,36 @@ class RNDAgent(nn.Module):
                             return e
                     else:
                         raise Exception('gradient_projection_backward_hook took a grad of unexpected shape')
+            
+
+            def gradient_projection_input_grad_backward_hook(module, grad_input, grad_output):
+                global bkwrd_loss_turn
+                assert len(grad_input) == 1, "grad_input has more than 1 elements but was expecting 1"
+                if bkwrd_loss_turn == 'loss2': # backward hook is currently called on representation_loss.backward (i.e. loss2.backward)
+                    a = gradient_projection_input_grad_backward_hook.gradient_projection_saved_input_grad # [d]
+                    b = grad_input[0] # [d]
+                    a = a.view(-1) # flatten matrix into a vector -> [d]
+                    b = b.view(-1) # flatten matrix into a vector -> [d]
+
+                    # calculate angle btw vectors
+                    cos_theta = torch.dot(a, b) / (torch.norm(a, p='fro') * torch.norm(b, p='fro'))
+                    theta = torch.acos(cos_theta) # in radians
+
+                    if  (radians(270) > torch.abs(theta) > radians(90)) or (radians(-90) > torch.abs(theta) > radians(-270)): # project gradients if angle is more than 90 degrees
+                        print('larger than 90')
+                        p = a * torch.dot(a, b) / torch.dot(a, a)
+                        e = b - p
+                        e = e.view(*grad_input[0].shape) # reshape the projected gradient vector back to original grad's shape (i.e. form matrix from vector)
+                        return (e, ) # return it as tuple since grad_input was a tuple
+
+                else: # backward hook is currently called on ppo_loss.backward (i.e. loss1.backward)
+                    # save input gradients for loss2.backward()'s hook call
+                    gradient_projection_input_grad_backward_hook.gradient_projection_saved_input_grad = grad_input[0].clone()
+
 
             self.weight_bkwrd_hook_handle = self.backbone_model[-2].weight.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
             self.bias_bkwrd_hook_handle = self.backbone_model[-2].bias.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
+            self.input_bkwrd_hook_handle = self.backbone_model[-2].register_full_backward_hook(gradient_projection_input_grad_backward_hook)
 
             self.use_gradient_projection = True
 
