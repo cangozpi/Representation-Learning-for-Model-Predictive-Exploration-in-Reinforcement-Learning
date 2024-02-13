@@ -128,8 +128,9 @@ class RNDAgent(nn.Module):
         if default_config.getboolean('use_gradient_projection'):
             global bkwrd_loss_turn 
             global backbone_model
-            from train import num_gradient_projections_in_last_100_epochs
+            from train import num_gradient_projections_in_last_100_epochs, mean_costheta_of_gradient_projections_in_last_100_epochs
             global num_gradient_projections_in_last_100_epochs
+            global mean_costheta_of_gradient_projections_in_last_100_epochs
             backbone_model = self.backbone_model
             def gradient_projection_backward_hook(grad):
                 global bkwrd_loss_turn
@@ -174,6 +175,7 @@ class RNDAgent(nn.Module):
             def gradient_projection_input_grad_backward_hook(module, grad_input, grad_output):
                 global bkwrd_loss_turn
                 global num_gradient_projections_in_last_100_epochs
+                global mean_costheta_of_gradient_projections_in_last_100_epochs
                 assert len(grad_input) == 1, "grad_input has more than 1 elements but was expecting 1"
                 if bkwrd_loss_turn == 'loss2': # backward hook is currently called on representation_loss.backward (i.e. loss2.backward)
                     a = gradient_projection_input_grad_backward_hook.gradient_projection_saved_input_grad # [d]
@@ -184,6 +186,7 @@ class RNDAgent(nn.Module):
                     # calculate angle btw vectors
                     cos_theta = torch.dot(a, b) / (torch.norm(a, p='fro') * torch.norm(b, p='fro'))
                     # theta = torch.acos(cos_theta) # in radians
+                    mean_costheta_of_gradient_projections_in_last_100_epochs.append(cos_theta.cpu().item())
 
                     # if cos_theta < 0:
                     # if  (radians(270) > torch.abs(theta) > radians(90)) or (radians(-90) > torch.abs(theta) > radians(-270)): # project gradients if angle is more than 90 degrees
@@ -545,6 +548,7 @@ class RNDAgent(nn.Module):
                     epoch_log_dict = {
                         **epoch_log_dict,
                         'train/Number of gradient projections in the last 100 epochs vs epoch': np.sum(num_gradient_projections_in_last_100_epochs),
+                        'train/Mean cos_theta of gradient projections in the last 100 epochs vs epoch': np.mean(mean_costheta_of_gradient_projections_in_last_100_epochs),
                     }
                 if default_config.getboolean('verbose_logging') == True:
                     epoch_log_dict = {
@@ -577,6 +581,7 @@ class RNDAgent(nn.Module):
                 self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
             if default_config.getboolean('use_gradient_projection') == True:
                 self.logger.log_scalar_to_tb_without_step('train/Number of gradient projections in the last 100 epochs vs epoch', np.sum(num_gradient_projections_in_last_100_epochs), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/Mean cos_theta of gradient projections in the last 100 epochs vs epoch', np.mean(mean_costheta_of_gradient_projections_in_last_100_epochs), only_rank_0=True)
             if default_config.getboolean('verbose_logging') == True:
                 self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), only_rank_0=True)
                 if default_config.getboolean('UseGradClipping') == True:

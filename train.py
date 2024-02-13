@@ -173,7 +173,9 @@ def main(args):
     agent.add_tb_graph(batch_size, stateStackSize, input_size)
 
     global num_gradient_projections_in_last_100_epochs
+    global mean_costheta_of_gradient_projections_in_last_100_epochs
     num_gradient_projections_in_last_100_epochs = deque([], maxlen=100)
+    mean_costheta_of_gradient_projections_in_last_100_epochs = deque([], maxlen=100)
     agent.setup_gradient_projection() # Note that doing this before calling agent.add_tb_graph() would raise an error
 
     if (default_config.getboolean('verbose_logging') == True) and (logger.use_wandb == True): # Log gradients and parameters of the model using wandb
@@ -221,6 +223,7 @@ def main(args):
         undiscounted_episode_return = load_checkpoint['undiscounted_episode_return']
         episode_lengths = load_checkpoint['episode_lengths']
         num_gradient_projections_in_last_100_epochs = load_checkpoint['num_gradient_projections_in_last_100_param_updates']
+        mean_costheta_of_gradient_projections_in_last_100_epochs = load_checkpoint['mean_costheta_of_gradient_projections_in_last_100_epochs']
         highest_mean_total_reward = load_checkpoint['highest_total_reward']
         highest_mean_undiscounted_episode_return  = load_checkpoint['highest_mean_undiscounted_episode_return']
         best_SSL_evaluation_epoch_loss  = load_checkpoint['best_SSL_evaluation_epoch_loss']
@@ -452,7 +455,7 @@ def main(args):
             
                     # save checkpoint
                     save_ckpt(-1, num_env_workers, num_step, default_config, highest_mean_total_reward, [], highest_mean_undiscounted_episode_return, undiscounted_episode_return, GLOBAL_RANK, \
-                        logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_epochs, number_of_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, logger.tb_global_steps['SSL_pretraining_epoch'])
+                        logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_epochs, mean_costheta_of_gradient_projections_in_last_100_epochs, number_of_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, logger.tb_global_steps['SSL_pretraining_epoch'])
 
                     # update best score
                     if best_SSL_evaluation_epoch_loss > SSL_evaluation_epoch_loss:
@@ -753,7 +756,7 @@ def main(args):
 
         # Save checkpoint
         save_ckpt(global_step, num_env_workers, num_step, default_config, highest_mean_total_reward, total_reward, highest_mean_undiscounted_episode_return, undiscounted_episode_return, GLOBAL_RANK, \
-            logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_epochs, number_of_visited_rooms, total_num_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, float("inf"), -1)
+            logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_epochs, mean_costheta_of_gradient_projections_in_last_100_epochs, number_of_visited_rooms, total_num_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, float("inf"), -1)
 
         # update best scores:
         if highest_mean_undiscounted_episode_return < np.mean(undiscounted_episode_return): # checkpointing the best performing agent so far for the metric mean undiscounted episode return
@@ -791,7 +794,7 @@ def main(args):
 
 # Save checkpoint
 def save_ckpt(global_step, num_env_workers, num_step, default_config, highest_mean_total_reward, total_reward, highest_mean_undiscounted_episode_return, undiscounted_episode_return, GLOBAL_RANK, \
-    logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_param_updates, number_of_visited_rooms, total_num_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, SSL_pretraining_epoch):
+    logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_param_updates, mean_costheta_of_gradient_projections_in_last_100_epochs, number_of_visited_rooms, total_num_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, SSL_pretraining_epoch):
     if (
         (global_step % (num_env_workers * num_step * int(default_config["saveCkptEvery"])) == 0) # scheduled checkpointing time
         or
@@ -856,6 +859,7 @@ def save_ckpt(global_step, num_env_workers, num_step, default_config, highest_me
                 'undiscounted_episode_return': undiscounted_episode_return,
                 'episode_lengths': episode_lengths,
                 'num_gradient_projections_in_last_100_param_updates': num_gradient_projections_in_last_100_param_updates,
+                'mean_costheta_of_gradient_projections_in_last_100_epochs': mean_costheta_of_gradient_projections_in_last_100_epochs,
                 'highest_total_reward': np.mean(total_reward),
                 'highest_mean_undiscounted_episode_return': np.mean(undiscounted_episode_return),
                 'best_SSL_evaluation_epoch_loss': SSL_evaluation_epoch_loss,
