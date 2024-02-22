@@ -20,13 +20,20 @@ from dist_utils import get_dist_info
 from config import args
 from math import radians
 
+from utils import Env_action_space_type
+from torch.distributions.normal import Normal
+
+from utils import Env_action_space_type
+
 import wandb
+
 
 class RNDAgent(nn.Module):
     def __init__(
             self,
             input_size,
             output_size,
+            env_action_space_type,
             num_env,
             num_step,
             gamma,
@@ -45,7 +52,8 @@ class RNDAgent(nn.Module):
             device = None,
             logger:Logger=None):
         super().__init__()
-        self.model = CnnActorCriticNetwork(input_size, output_size, use_noisy_net)
+        self.env_action_space_type = env_action_space_type
+        self.model = CnnActorCriticNetwork(input_size, output_size, self.env_action_space_type, use_noisy_net)
         self.num_env = num_env
         self.output_size = output_size
         self.input_size = input_size
@@ -265,12 +273,21 @@ class RNDAgent(nn.Module):
 
     def get_action(self, state):
         state = torch.Tensor(state).type(torch.float32).to(self.device)
-        policy, value_ext, value_int = self.model(state)
-        action_prob = F.softmax(policy, dim=-1).data.cpu().numpy()
+        if self.env_action_space_type == Env_action_space_type.DISCRETE:
+            policy, value_ext, value_int = self.model(state)
+            action_prob = F.softmax(policy, dim=-1).data.cpu().numpy()
 
-        action = self.random_choice_prob_index(action_prob)
+            action = self.random_choice_prob_index(action_prob)
 
-        return action, value_ext.detach().cpu().numpy().squeeze(), value_int.detach().cpu().numpy().squeeze(), policy.detach().cpu().numpy()
+            return action, value_ext.detach().cpu().numpy().squeeze(), value_int.detach().cpu().numpy().squeeze(), policy.detach().cpu().numpy()
+
+        elif self.env_action_space_type == Env_action_space_type.CONTINUOUS:
+            mu, std, value_ext, value_int = self.model(state)
+            cont_dist = Normal(mu, std)
+            action = cont_dist.sample()
+            logp_a = cont_dist.log_prob(action).sum(axis=-1).unsqueeze(-1)
+
+            return action.detach().cpu().numpy(), value_ext.detach().cpu().numpy().squeeze(), value_int.detach().cpu().numpy().squeeze(), logp_a.detach().cpu().numpy()
 
     @staticmethod
     def random_choice_prob_index(p, axis=1):
@@ -311,7 +328,8 @@ class RNDAgent(nn.Module):
         for i in range(self.epoch):
             np.random.shuffle(sample_range)
 
-            total_loss, total_actor_loss, total_critic_loss, total_critic_loss_int, total_critic_loss_ext, total_entropy_loss, total_rnd_loss, total_representation_loss = [], [], [], [], [], [], [], []
+            total_loss, total_actor_loss, total_critic_loss, total_critic_loss_int, total_critic_loss_ext, total_entropy_loss, total_rnd_loss, total_representation_loss, \
+                total_approx_kl, total_entropy = [], [], [], [], [], [], [], [], [], []
             total_grad_norm_unclipped = []
             if default_config.getboolean('UseGradClipping'):
                 total_grad_norm_clipped = []
@@ -324,14 +342,39 @@ class RNDAgent(nn.Module):
                 target_ext_batch = torch.FloatTensor(target_ext)[batch_indices].to(self.device)
                 if self.train_method in ['original_RND', 'modified_RND']:
                     target_int_batch = torch.FloatTensor(target_int)[batch_indices].to(self.device)
-                y_batch = torch.LongTensor(y)[batch_indices].to(self.device)
+                if self.env_action_space_type == Env_action_space_type.DISCRETE:
+                    y_batch = torch.LongTensor(y)[batch_indices].to(self.device)
+                elif self.env_action_space_type == Env_action_space_type.CONTINUOUS:
+                    y_batch = torch.FloatTensor(y)[batch_indices].to(self.device)
                 adv_batch = torch.FloatTensor(adv)[batch_indices].to(self.device)
                 if self.train_method in ['original_RND', 'modified_RND']:
                     normalized_extracted_feature_embeddings_batch = torch.FloatTensor(normalized_extracted_feature_embeddings)[batch_indices].to(self.device)
                 with torch.no_grad():
-                    policy_old_list = torch.tensor(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[batch_indices].to(self.device) # --> [num_env*batch_size, output_size]
-                    m_old = Categorical(F.softmax(policy_old_list, dim=-1))
-                    log_prob_old = m_old.log_prob(y_batch)
+                    if self.env_action_space_type == Env_action_space_type.DISCRETE:
+                        policy_old_list = torch.tensor(old_policy).permute(1, 0, 2).contiguous().view(-1, self.output_size)[batch_indices].to(self.device) # --> [num_env*batch_size, output_size]
+                        m_old = Categorical(F.softmax(policy_old_list, dim=-1))
+                        log_prob_old = m_old.log_prob(y_batch)
+
+                        if False: # for debugging
+                            policy1 = self.model(torch.FloatTensor(states).to(self.device))[0].contiguous().view(-1, self.output_size)[batch_indices].to(self.device) # This should equal to 'policy_old_list'
+                            assert torch.allclose(policy_old_list, policy1), "Something is wrong with the indexing of old_policy and y_batch correspondance !"
+
+                    elif self.env_action_space_type == Env_action_space_type.CONTINUOUS:
+                        log_prob_old = torch.tensor(old_policy).permute(1, 0, 2).contiguous().view(-1, 1)[batch_indices].to(self.device) # --> [num_env*batch_size, 1] # Note: old_policy corresponds to 'logp_a' values for CONTINUOUS action space
+
+                        if False: # for debugging
+                            mu1, std1, _, _  = self.model(torch.FloatTensor(states).to(self.device)) # [num_env*batch_size, 1]
+                            mu1 = mu1.contiguous().view(-1, self.output_size)[batch_indices].to(self.device) # [batch_size, 1]
+                            cont_dist1 = torch.distributions.normal.Normal(mu1, std1)
+                            logp_a1 = cont_dist1.log_prob(y_batch.unsqueeze(-1)).sum(axis=-1).unsqueeze(-1) # This should be equal to log_prob_old
+                            assert torch.allclose(log_prob_old, logp_a1), "Something is wrong with the indexing of states and y_batch correspondance !"
+
+                            # another check of the smae thing which directly uses s_batch:
+                            mu1, std1, _, _  = self.model(s_batch) # [num_env*batch_size, 1]
+                            mu1 = mu1.contiguous().view(-1, self.output_size) # [batch_size, 1]
+                            cont_dist1 = torch.distributions.normal.Normal(mu1, std1)
+                            logp_a1 = cont_dist1.log_prob(y_batch.unsqueeze(-1)).sum(axis=-1).unsqueeze(-1) # This should be equal to log_prob_old
+                            assert torch.allclose(log_prob_old, logp_a1), "Something is wrong with the indexing of states and y_batch correspondance !"
 
 
 
@@ -444,11 +487,19 @@ class RNDAgent(nn.Module):
 
                 # --------------------------------------------------------------------------------
                 # for Proximal Policy Optimization (PPO):
-                policy, value_ext, value_int = self.model(s_batch)
-                m = Categorical(F.softmax(policy, dim=-1))
-                log_prob = m.log_prob(y_batch)
+                if self.env_action_space_type == Env_action_space_type.DISCRETE:
+                    policy, value_ext, value_int = self.model(s_batch)
+                    m = Categorical(F.softmax(policy, dim=-1))
+                    log_prob = m.log_prob(y_batch)
 
-                ratio = torch.exp(log_prob - log_prob_old)
+                elif self.env_action_space_type == Env_action_space_type.CONTINUOUS:
+                    mu, std, value_ext, value_int  = self.model(s_batch)
+                    mu = mu.contiguous().view(-1, self.output_size) # [batch_size, 1]
+                    m = torch.distributions.normal.Normal(mu, std)
+                    log_prob = m.log_prob(y_batch.unsqueeze(-1)).sum(axis=-1).unsqueeze(-1)
+
+
+                ratio = torch.exp(log_prob - log_prob_old) # Note that for the first pass (i.e. epoch=0) ratio has to equal 1
 
                 surr1 = ratio * adv_batch
                 surr2 = torch.clamp(
@@ -466,6 +517,7 @@ class RNDAgent(nn.Module):
                 critic_loss = critic_ext_loss + critic_int_loss
 
                 entropy = m.entropy().mean()
+                approx_kl = (log_prob_old - log_prob).detach().mean().item()
                 # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
@@ -508,6 +560,8 @@ class RNDAgent(nn.Module):
                     total_critic_loss_int.append(0.5 * critic_int_loss.detach().cpu().item())
                 total_critic_loss_ext.append(0.5 * critic_ext_loss.detach().cpu().item())
                 total_entropy_loss.append(- self.ent_coef * entropy.detach().cpu().item())
+                total_entropy.append(entropy.detach().cpu().item())
+                total_approx_kl.append(approx_kl)
                 if self.rnd is not None:
                     total_rnd_loss.append(rnd_loss.detach().cpu().item())
                 if self.representation_model is not None:
@@ -532,6 +586,8 @@ class RNDAgent(nn.Module):
                     'train/PPO_critic_loss (intrinsic + extrinsic) vs epoch': np.mean(total_critic_loss),
                     'train/PPO_critic_loss (extrinsic) vs epoch': np.mean(total_critic_loss_ext),
                     'train/PPO_entropy_loss vs epoch': np.mean(total_entropy_loss),
+                    'train/PPO entropy vs epoch': np.mean(total_entropy),
+                    'train/PPO approximate_KL vs epoch': np.mean(total_approx_kl),
                 }
                 if self.rnd is not None:
                     epoch_log_dict = {
@@ -574,6 +630,8 @@ class RNDAgent(nn.Module):
             self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrinsic + extrinsic) vs epoch', np.mean(total_critic_loss), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (extrinsic) vs epoch', np.mean(total_critic_loss_ext), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO entropy vs epoch', np.mean(total_entropy), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO approximate_KL vs epoch', np.mean(total_approx_kl), only_rank_0=True)
             if self.rnd is not None:
                 self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
@@ -604,8 +662,12 @@ class RNDAgent(nn.Module):
                 def graph_forward(dummy_state_batch):
                     return_vals = []
                     if self.model is not None: # PPO
-                        policy, value_ext, value_int = self.model(dummy_state_batch)
-                        return_vals += [policy, value_ext, value_int]
+                        if self.model.env_action_space_type == Env_action_space_type.DISCRETE:
+                            policy, value_ext, value_int = self.model(dummy_state_batch)
+                            return_vals += [policy, value_ext, value_int]
+                        elif self.model.env_action_space_type == Env_action_space_type.CONTINUOUS:
+                            mu, std, value_ext, value_int = self.model(dummy_state_batch)
+                            return_vals += [mu, std, value_ext, value_int]
                     if self.representation_model is not None: # Representation model
                         representation_output = self.representation_model(dummy_state_batch, dummy_state_batch)
                         return_vals += [representation_output]

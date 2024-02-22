@@ -300,7 +300,7 @@ class AtariEnvironment(Environment):
             action = self.child_conn.recv()
             # assert ...
 
-            if 'Breakout' in self.env_id: # TODO: not sure why other implementations do this. Find it out
+            if 'Breakout' in self.env_id: # # used for eliminating the <NOOP> action from the set of availble actions (i.e. avaiable actions become [1,2,3] where 0 was the <NOOP>)
                 action += 1
 
             state, reward, done, trun, info = self.env.step(action)
@@ -424,7 +424,7 @@ class MarioEnvironment(Environment):
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            self.child_conn.send([state, reward, done, trun])
+            self.child_conn.send([state, reward, done, trun, {}]) # return '{}' for visited_rooms which belonged to MontezumaRevenge Atari Env
 
             if done or trun:
                 self.child_conn.send([info['episode']['undiscounted_episode_return'], info['episode']['l'], info['episode']['num_finished_episodes']])
@@ -525,6 +525,7 @@ class ClassicControlEnvironment(Environment):
 
 
             state, reward, done, trun, info = self.env.step(action)
+            reward = float(reward)
 
             self.rall += reward
 
@@ -537,7 +538,7 @@ class ClassicControlEnvironment(Environment):
                 # state, _info = self.reset()
                 state, _info = self.reset(seed=self.seed)
 
-            self.child_conn.send([state, reward, done, trun])
+            self.child_conn.send([state, reward, done, trun, {}]) # return '{}' for visited_rooms which belonged to MontezumaRevenge Atari Env
 
             if done or trun:
                 self.child_conn.send([info['episode']['undiscounted_episode_return'], info['episode']['l'], info['episode']['num_finished_episodes']])

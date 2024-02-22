@@ -12,6 +12,7 @@ from dist_utils import ddp_setup, create_parallel_env_processes
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset, DataLoader
+from utils import Env_action_space_type
 
 
 # from torch.distributed.elastic.multiprocessing.errors import record
@@ -73,12 +74,17 @@ def main(args):
     else:
         input_size = env.observation_space.shape  # 4
 
-    if isinstance(env.action_space, gym.spaces.box.Box):
+    env_action_space_type = None
+    if isinstance(env.action_space, gym.spaces.box.Box):# Continuous action space
         output_size = env.action_space.shape[0]
-    else:
+        env_action_space_type = Env_action_space_type.CONTINUOUS
+    elif isinstance(env.action_space, gym.spaces.Discrete): # Discrete action space
         output_size = env.action_space.n  # 2
+        env_action_space_type = Env_action_space_type.DISCRETE
+    else:
+        raise Exception(f'Env is using an unsupperted action space: {env.action_space}')
 
-    if 'Breakout' in env_id: #TODO: not sure why this was done in other implementations
+    if 'Breakout' in env_id: # used for eliminating the <NOOP> action from the set of availble actions (i.e. avaiable actions become [1,2,3] where 0 was the <NOOP>)
         output_size -= 1
 
     env.close()
@@ -146,6 +152,7 @@ def main(args):
     agent = agent(
         input_size,
         output_size,
+        env_action_space_type,
         num_env_workers,
         num_step,
         gamma,
@@ -315,7 +322,11 @@ def main(args):
             total_state = []
             for j in range(num_step):
                 # Collect rollout:
-                actions = np.random.randint(0, output_size, size=(num_env_workers,)).astype(dtype=np.int64) # Note that random action taking might be an issue which results in same images being used for training 
+                if env_action_space_type == Env_action_space_type.DISCRETE:
+                    actions = np.random.randint(0, output_size, size=(num_env_workers,)).astype(dtype=np.int64) # Note that random action taking might be an issue which results in same images being used for training
+                elif env_action_space_type == Env_action_space_type.CONTINUOUS:
+                    actions = np.random.uniform(low=0.0, high=1.0, size=(num_env_workers,)).astype(dtype=np.float32)
+                    actions = np.expand_dims(actions, axis=-1)
 
                 for parent_conn, action in zip(env_worker_parent_conns, actions):
                     parent_conn.send(action)
@@ -455,7 +466,8 @@ def main(args):
             
                     # save checkpoint
                     save_ckpt(-1, num_env_workers, num_step, default_config, highest_mean_total_reward, [], highest_mean_undiscounted_episode_return, undiscounted_episode_return, GLOBAL_RANK, \
-                        logger,agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_epochs, mean_costheta_of_gradient_projections_in_last_100_epochs, number_of_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, logger.tb_global_steps['SSL_pretraining_epoch'])
+                        logger, agent, representation_lr_method, obs_rms, reward_rms, discounted_reward, global_update, episode_lengths, num_gradient_projections_in_last_100_epochs, mean_costheta_of_gradient_projections_in_last_100_epochs, \
+                             number_of_visited_rooms, total_num_visited_rooms, env_id, save_ckpt_path, best_SSL_evaluation_epoch_loss, SSL_evaluation_epoch_loss, logger.tb_global_steps['SSL_pretraining_epoch'])
 
                     # update best score
                     if best_SSL_evaluation_epoch_loss > SSL_evaluation_epoch_loss:
@@ -472,7 +484,10 @@ def main(args):
             renderer = ParallelizedEnvironmentRenderer(num_env_workers)
         next_obs = []
         for step in range(num_step * pre_obs_norm_step):
-            actions = np.random.randint(0, output_size, size=(num_env_workers,)).astype(dtype=np.int64)
+            if env_action_space_type == Env_action_space_type.DISCRETE:
+                actions = np.random.randint(0, output_size, size=(num_env_workers,)).astype(dtype=np.int64)
+            elif env_action_space_type == Env_action_space_type.CONTINUOUS:
+                actions = np.random.uniform(low=env.action_space.low.item(), high=env.action_space.high.item(), size=(num_env_workers, output_size)).astype(dtype=np.float32)
 
             for parent_conn, action in zip(env_worker_parent_conns, actions):
                 parent_conn.send(action)
@@ -545,11 +560,15 @@ def main(args):
 
         # Step 1. n-step rollout
         for step in range(num_step):
-            actions, value_ext, value_int, policy = agent.module.get_action(np.float32(states) / 255.)
-            assert (list(actions.shape) == [num_env_workers, ]) and (actions.dtype == np.int64)
+            actions, value_ext, value_int, policy = agent.module.get_action(np.float32(states) / 255.) # Note: if action space is Continuous then policy 'correpsonds' to 'logp_a'
+            if env_action_space_type == Env_action_space_type.DISCRETE:
+                assert (list(actions.shape) == [num_env_workers, ]) and (actions.dtype == np.int64)
+                assert (list(policy.shape) == [num_env_workers, output_size]) and (policy.dtype == np.float32)
+            elif env_action_space_type == Env_action_space_type.CONTINUOUS:
+                assert (list(actions.shape) == [num_env_workers, output_size]) and (actions.dtype == np.float32)
+                assert (list(policy.shape) == [num_env_workers, 1]) and (policy.dtype == np.float32)
             assert (list(value_ext.shape) == [num_env_workers, ]) and (value_ext.dtype == np.float32)
             assert (list(value_int.shape) == [num_env_workers, ]) and (value_ext.dtype == np.float32)
-            assert (list(policy.shape) == [num_env_workers, output_size]) and (policy.dtype == np.float32)
 
             for parent_conn, action in zip(env_worker_parent_conns, actions):
                 parent_conn.send(action)
@@ -656,11 +675,15 @@ def main(args):
         total_policy = np.stack(total_policy) # --> [num_step, num_env, output_size]
         assert (list(total_state.shape) == [num_env_workers*num_step, stateStackSize, input_size, input_size]) and (total_state.dtype == np.float64)
         assert (list(total_reward.shape) == [num_env_workers, num_step]) and (total_reward.dtype == np.float64)
-        assert (list(total_action.shape) == [num_env_workers*num_step]) and (total_action.dtype == np.int64)
         assert (list(total_done.shape) == [num_env_workers, num_step]) and (total_done.dtype == np.bool_)
         assert (list(total_ext_values.shape) == [num_env_workers, (num_step + 1)]) and (total_ext_values.dtype == np.float32)
         assert (list(total_int_values.shape) == [num_env_workers, (num_step + 1)]) and (total_int_values.dtype == np.float32)
-        assert (list(total_policy.shape) == [num_step, num_env_workers, output_size]) and (total_policy.dtype == np.float32)
+        if env_action_space_type == Env_action_space_type.DISCRETE:
+            assert (list(total_action.shape) == [num_env_workers*num_step]) and (total_action.dtype == np.int64)
+            assert (list(total_policy.shape) == [num_step, num_env_workers, output_size]) and (total_policy.dtype == np.float32)
+        elif env_action_space_type == Env_action_space_type.CONTINUOUS:
+            assert (list(total_action.shape) == [num_env_workers*num_step]) and (total_action.dtype == np.float32)
+            assert (list(total_policy.shape) == [num_step, num_env_workers, 1]) and (total_policy.dtype == np.float32)
 
 
         # Step 2. calculate intrinsic reward

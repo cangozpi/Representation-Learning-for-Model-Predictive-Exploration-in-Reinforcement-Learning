@@ -29,6 +29,11 @@ import wandb
 use_gae = default_config.getboolean('UseGAE')
 GAE_lambda = float(default_config['GAELambda'])
 
+from enum import Enum
+class Env_action_space_type(Enum):
+    DISCRETE = 0
+    CONTINUOUS = 1
+
 def init_tb_global_step():
     return 0
 

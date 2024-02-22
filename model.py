@@ -6,6 +6,7 @@ import numpy as np
 import math
 from torch.nn import init
 from config import default_config
+from utils import Env_action_space_type
 
 
 class NoisyLinear(nn.Module):
@@ -78,8 +79,16 @@ class CnnActorCriticNetwork(nn.Module):
     # self.extracted_feature_embedding_dim  = 448
     extracted_feature_embedding_dim  = int(default_config['extracted_feature_embedding_dim'])
 
-    def __init__(self, input_size, output_size, use_noisy_net=False):
+    def __init__(self, input_size, output_size, env_action_space_type, use_noisy_net=False, ):
         super(CnnActorCriticNetwork, self).__init__()
+        self.env_action_space_type = env_action_space_type
+
+        if self.env_action_space_type == Env_action_space_type.DISCRETE:
+            pass
+        elif self.env_action_space_type == Env_action_space_type.CONTINUOUS:
+            log_std = -0.5 * np.ones(output_size, dtype=np.float32)
+            self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
+
 
         if use_noisy_net:
             print('use NoisyNet')
@@ -118,11 +127,20 @@ class CnnActorCriticNetwork(nn.Module):
             nn.ReLU()
         )
 
-        self.actor = nn.Sequential(
-            linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
-            nn.ReLU(),
-            linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size)
-        )
+        # Discrete/Continuous Actor Heads:
+        if self.env_action_space_type == Env_action_space_type.DISCRETE:
+            self.actor = nn.Sequential(
+                linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
+                nn.ReLU(),
+                linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size)
+            )
+        elif self.env_action_space_type == Env_action_space_type.CONTINUOUS:
+            self.actor = nn.Sequential(
+                linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
+                nn.ReLU(),
+                linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size),
+                nn.Tanh() # output range [-1, 1]
+            )
 
         self.extra_layer = nn.Sequential(
             linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
@@ -222,10 +240,17 @@ class CnnActorCriticNetwork(nn.Module):
 
     def forward(self, state):
         x = self.feature(state)
-        policy = self.actor(x)
-        value_ext = self.critic_ext(self.extra_layer(x) + x)
-        value_int = self.critic_int(self.extra_layer(x) + x)
-        return policy, value_ext, value_int
+        if self.env_action_space_type == Env_action_space_type.DISCRETE:
+            policy = self.actor(x)
+            value_ext = self.critic_ext(self.extra_layer(x) + x)
+            value_int = self.critic_int(self.extra_layer(x) + x)
+            return policy, value_ext, value_int
+        elif self.env_action_space_type == Env_action_space_type.CONTINUOUS:
+            mu = self.actor(x)
+            std = torch.exp(self.log_std)
+            value_ext = self.critic_ext(self.extra_layer(x) + x)
+            value_int = self.critic_int(self.extra_layer(x) + x)
+            return mu, std, value_ext, value_int
 
 
 class RNDModel(nn.Module):
