@@ -43,6 +43,7 @@ lib/
 
 profile*.html
 profile*.json
+*.html
 
 hpc_stuff*
 wandb

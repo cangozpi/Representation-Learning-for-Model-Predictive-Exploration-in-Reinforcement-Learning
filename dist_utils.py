@@ -88,7 +88,11 @@ def create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_
     GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK = get_dist_info()
 
     if default_config['EnvType'] == 'atari': # other env_type's raise a pickling related error
-        mp.set_start_method('spawn') # required to avoid python's GIL issue, (also logger cannot be passed to env process constructor, see the issue: https://discuss.pytorch.org/t/thread-lock-object-cannot-be-pickled-when-using-pytorch-multiprocessing-package-with-spawn-method/184953)
+        # mp.set_start_method('spawn', force=True) # required to avoid python's GIL issue, (also logger cannot be passed to env process constructor, see the issue: https://discuss.pytorch.org/t/thread-lock-object-cannot-be-pickled-when-using-pytorch-multiprocessing-package-with-spawn-method/184953)
+        try:
+            mp.set_start_method('spawn')
+        except RuntimeError:
+            pass
 
     env_workers = []
     parent_conns = []

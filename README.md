@@ -55,19 +55,36 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
 
 ---
 ### Profiling
-* Profiling with Scalene (Example):
-    ```bash
-    scalene --no-browser --cpu --gpu --memory --outfile profile_rnd_montezuma.html --profile-interval 120 main.py --train --config_path=./configs/demo_config.conf --log_name=rnd00 --save_model_path=checkpoints/rnd00.ckpt
-
-    ```
 * Profiling with Scalene (torchrun Example):
-    ```bash
-    python -m scalene --- -m torch.distributed.run --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt
-    ```
+    * Logs are directly outputted to browser:
+        ```bash
+        python -m scalene --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
+        ```
+    * Logs are not opened on the browser but are logged to an output file:
+        ```bash
+        python -m scalene --no-browser --outfile scaleneProfiler00_rnd00.html --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
+        ```
+        or
+        ```bash
+        make scalene_profiling
+        ```
 
 * Profiling with Pytorch Profiler (torchrun Example):
     ```bash
-    torchrun --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --pytorch_profiling
+    torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --pytorch_profiling
+    ```
+    or
+    ```bash
+    make pytorch_profiling
+    ```
+    * To see the profiling results run:
+        ```bash
+        make start_tensorboard_profiles
+        ```
+
+* Profiling with Scalene options example (not suitable for our torchrun code):
+    ```bash
+    scalene --no-browser --cpu --gpu --memory --outfile profile_rnd_montezuma.html --profile-interval 120 main.py --train --config_path=./configs/demo_config.conf --log_name=rnd00 --save_model_path=checkpoints/rnd00.ckpt
     ```
 ---
 
