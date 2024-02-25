@@ -319,7 +319,7 @@ def main(args):
         SSL_eval_dataloader = None
 
         while True:
-            total_state = []
+            total_state = np.zeros((num_env_workers*num_step, stateStackSize, input_size, input_size), dtype=np.float64)
             for j in range(num_step):
                 # Collect rollout:
                 if env_action_space_type == Env_action_space_type.DISCRETE:
@@ -331,7 +331,7 @@ def main(args):
                 for parent_conn, action in zip(env_worker_parent_conns, actions):
                     parent_conn.send(action)
                 
-                next_states = []
+                next_states = np.zeros([num_env_workers, stateStackSize, input_size, input_size], dtype=np.float64) # -> [num_env, state_stack_size, H, W]
                 for env_idx, parent_conn in enumerate(env_worker_parent_conns):
                     s, r, d, trun, visited_rooms = parent_conn.recv()
                     assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
@@ -339,7 +339,7 @@ def main(args):
                     assert type(d) == bool
                     assert type(trun) == bool
 
-                    next_states.append(s)
+                    next_states[env_idx] = s[:]
 
                     if d or trun:
                         info = {'episode': {}}
@@ -356,10 +356,9 @@ def main(args):
                             logger.log_msg_to_both_console_and_file(f'[Rank: {GLOBAL_RANK}, env: {env_idx} ] episode: {info["episode"]["num_finished_episodes"]}, step: {info["episode"]["l"]}, undiscounted_return: {info["episode"]["undiscounted_episode_return"]}, moving_average_undiscounted_return: {np.mean(info["episode"]["undiscounted_episode_return"])}')
 
 
-                next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
                 assert (list(next_states.shape) == [num_env_workers, stateStackSize, input_size, input_size]) and (next_states.dtype == np.float64)
 
-                total_state.append(states)
+                total_state[(j * num_env_workers): (j * num_env_workers) + num_env_workers] = states[:]
 
                 states = next_states[:, :, :, :] # for an explanation of why [:, :, :, :] is used refer to the discussion: https://stackoverflow.com/questions/61103275/what-is-the-difference-between-tensor-and-tensor-in-pytorch 
 
@@ -367,7 +366,7 @@ def main(args):
                     renderer.render(next_states[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
                 
 
-            total_state = np.stack(total_state).transpose([1, 0, 2, 3, 4]).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
+            total_state = total_state.reshape([num_step, num_env_workers, stateStackSize, input_size, input_size]).transpose(1, 0, 2, 3, 4).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
             assert (list(total_state.shape) == [num_env_workers*num_step, stateStackSize, input_size, input_size]) and (total_state.dtype == np.float64) 
                     
             if SSL_eval_dataloader == None: # first collected rollout will be used as the evaluation data
@@ -482,7 +481,12 @@ def main(args):
         logger.log_msg_to_both_console_and_file('Start to initialize observation normalization parameter.....', only_rank_0=True)
         if is_render:
             renderer = ParallelizedEnvironmentRenderer(num_env_workers)
-        next_obs = []
+        if train_method == 'original_RND':
+            next_obs = np.zeros([num_env_workers * num_step, 1, input_size, input_size])
+        elif train_method == 'modified_RND':
+            next_obs = np.zeros([num_env_workers * num_step, stateStackSize, input_size, input_size])
+        elif train_method == 'PPO':
+            next_obs = np.zeros([num_env_workers * num_step, stateStackSize, input_size, input_size])
         for step in range(num_step * pre_obs_norm_step):
             if env_action_space_type == Env_action_space_type.DISCRETE:
                 actions = np.random.randint(0, output_size, size=(num_env_workers,)).astype(dtype=np.int64)
@@ -511,23 +515,23 @@ def main(args):
                         logger.log_msg_to_both_console_and_file(f'[Rank: {GLOBAL_RANK}, env: {env_idx} ] episode: {info["episode"]["num_finished_episodes"]}, step: {info["episode"]["l"]}, undiscounted_return: {info["episode"]["undiscounted_episode_return"]}, moving_average_undiscounted_return: {np.mean(info["episode"]["undiscounted_episode_return"])}')
 
                 if train_method == 'original_RND':
-                    next_obs.append(s[stateStackSize - 1, :, :].reshape([1, input_size, input_size])) # [1, input_size, input_size]
+                    next_obs[((step * num_env_workers) + env_idx) % (num_step * num_env_workers), :, :, :] = s[stateStackSize - 1, :, :].reshape([1, input_size, input_size]) # [1, input_size, input_size]
                 elif train_method == 'modified_RND':
-                    next_obs.append(s) # [stateStackSize, input_size, input_size]
+                    next_obs[((step * num_env_workers) + env_idx) % (num_step * num_env_workers), :, :, :] = s # [stateStackSize, input_size, input_size]
                 elif (train_method == 'PPO') and is_render: # next_obs is just used for rendering purposes
-                    next_obs.append(s) # [stateStackSize, input_size, input_size]
+                    next_obs[((step * num_env_workers) + env_idx) % (num_step * num_env_workers), :, :, :] = s # [stateStackSize, input_size, input_size]
                 
 
             if is_render:
                 if train_method == 'original_RND':
-                    renderer.render(np.stack(next_obs[-num_env_workers:])) # [num_env, 1, input_size, input_size]
+                    renderer.render(next_obs[((step * num_env_workers) % (num_step * num_env_workers)):((step * num_env_workers) % (num_step * num_env_workers)) + num_env_workers]) # [num_env, 1, input_size, input_size]
                 elif train_method == 'modified_RND':
-                    renderer.render(np.stack(next_obs[-num_env_workers:])[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
+                    renderer.render(next_obs[((step * num_env_workers) % (num_step * num_env_workers)):((step * num_env_workers) % (num_step * num_env_workers)) + num_env_workers][:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
                 elif train_method == 'PPO':
-                    renderer.render(np.stack(next_obs[-num_env_workers:])[:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
+                    renderer.render(next_obs[((step * num_env_workers) % (num_step * num_env_workers)):((step * num_env_workers) % (num_step * num_env_workers)) + num_env_workers][:, -1, :, :].reshape([num_env_workers, 1, input_size, input_size])) # [num_env, 1, input_size, input_size]
             if train_method in ['original_RND', 'modified_RND']:
                 if len(next_obs) % (num_step * num_env_workers) == 0:
-                    next_obs = np.stack(next_obs) # modified_RND: [(num_step * num_env_workers), stateStackSize, input_size, input_size], original_RND:[(num_step * num_env_workers), 1, input_size, input_size]
+                    # next_obs --> modified_RND: [(num_step * num_env_workers), stateStackSize, input_size, input_size], original_RND:[(num_step * num_env_workers), 1, input_size, input_size]
                     if train_method == 'original_RND':
                         assert (list(next_obs.shape) == [num_step*num_env_workers, 1, input_size, input_size])
                         obs_rms.update(next_obs)
@@ -537,12 +541,11 @@ def main(args):
                             extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
                             assert (list(extracted_feature_embeddings.shape) == [num_step*num_env_workers, extracted_feature_embedding_dim])
                         obs_rms.update(extracted_feature_embeddings)
-                    next_obs = []
         if is_render:
             renderer.close()
         logger.log_msg_to_both_console_and_file('End to initialize...', only_rank_0=True)
     
- 
+
 
     if is_render:
         renderer = ParallelizedEnvironmentRenderer(num_env_workers)
@@ -553,8 +556,24 @@ def main(args):
 
     while True:
 
-        total_state, total_reward, total_done, total_action, total_int_reward, total_next_obs, total_ext_values, total_int_values, total_policy = \
-            [], [], [], [], [], [], [], [], []
+        total_state = np.zeros([num_env_workers * num_step, stateStackSize, input_size, input_size], dtype=np.float64)
+        total_reward = np.zeros([num_env_workers * num_step], dtype=np.float64)
+        if env_action_space_type == Env_action_space_type.DISCRETE:
+            total_action = np.zeros([num_env_workers * num_step, ], dtype=np.int64)
+        elif env_action_space_type == Env_action_space_type.CONTINUOUS:
+            total_action = np.zeros([num_env_workers * num_step, output_size], dtype=np.float32)
+        total_done = np.zeros([num_env_workers * num_step], dtype=np.bool_)
+        if train_method == 'original_RND':
+            total_next_obs = np.zeros([num_env_workers*num_step, 1, input_size, input_size], dtype=np.float64)
+        elif train_method == 'modified_RND':
+            total_next_obs = np.zeros([num_env_workers*num_step, stateStackSize, input_size, input_size], dtype=np.float64)
+        total_ext_values = np.zeros([num_env_workers * (num_step + 1)], dtype=np.float32)
+        total_int_values = np.zeros([num_env_workers * (num_step + 1)], dtype=np.float32)
+        if env_action_space_type == Env_action_space_type.DISCRETE:
+            total_policy = np.zeros([num_step * num_env_workers, output_size], dtype=np.float32)
+        elif env_action_space_type == Env_action_space_type.CONTINUOUS:
+            total_policy = np.zeros([num_step * num_env_workers, 1], dtype=np.float32)
+        total_int_reward = np.zeros([num_step * num_env_workers], dtype=np.float32)
         global_step += (num_env_workers * num_step)
         global_update += 1
 
@@ -573,7 +592,13 @@ def main(args):
             for parent_conn, action in zip(env_worker_parent_conns, actions):
                 parent_conn.send(action)
 
-            next_states, rewards, dones, next_obs = [], [], [], []
+            next_states = np.zeros([num_env_workers, stateStackSize, input_size, input_size], dtype=np.float64) # -> [num_env, state_stack_size, H, W]
+            rewards = np.zeros([num_env_workers,], dtype=np.float64)
+            dones = np.zeros([num_env_workers, ], dtype=np.bool_)
+            if train_method == 'original_RND':
+                next_obs = np.zeros([num_env_workers, 1, input_size, input_size], dtype=np.float64)
+            elif train_method == 'modified_RND':
+                next_obs = np.zeros([num_env_workers, stateStackSize, input_size, input_size], dtype=np.float64)
             for env_idx, parent_conn in enumerate(env_worker_parent_conns):
                 s, r, d, trun, visited_rooms = parent_conn.recv()
                 assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
@@ -581,14 +606,15 @@ def main(args):
                 assert type(d) == bool
                 assert type(trun) == bool
 
-                next_states.append(s)
-                rewards.append(r)
-                dones.append(d) # --> [num_env]
+                next_states[env_idx] = s[:]
+                rewards[env_idx] = r
+                dones[env_idx] = d
+
                 total_num_visited_rooms = total_num_visited_rooms.union(visited_rooms)
                 if train_method == 'original_RND':
-                    next_obs.append(s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size])) # [1, input_size, input_size]
+                    next_obs[env_idx] = s[(stateStackSize - 1), :, :].reshape([1, input_size, input_size])[:] # [1, input_size, input_size]
                 elif train_method == 'modified_RND':
-                    next_obs.append(s) # [stateStackSize, input_size, input_size]
+                    next_obs[env_idx] = s[:] # [extstateStackSize, input_size, input_size]
 
                 if d or trun:
                     info = {'episode': {}}
@@ -605,14 +631,9 @@ def main(args):
                         logger.log_msg_to_both_console_and_file(f'[Rank: {GLOBAL_RANK}, env: {env_idx} ] episode: {info["episode"]["num_finished_episodes"]}, step: {info["episode"]["l"]}, undiscounted_return: {info["episode"]["undiscounted_episode_return"]}, moving_average_undiscounted_return: {np.mean(info["episode"]["undiscounted_episode_return"])}')
 
 
-            next_states = np.stack(next_states) # -> [num_env, state_stack_size, H, W]
-            rewards = np.hstack(rewards) # -> [num_env, ]
-            dones = np.hstack(dones) # -> [num_env, ]
             assert (list(next_states.shape) == [num_env_workers, stateStackSize, input_size, input_size]) and (next_states.dtype == np.float64)
             assert (list(rewards.shape) == [num_env_workers, ]) and (rewards.dtype == np.float64)
             assert (list(dones.shape) == [num_env_workers, ]) and (dones.dtype == np.bool_)
-            if train_method in ['original_RND', 'modified_RND']:
-                next_obs = np.stack(next_obs) # -> modified_RND: [num_env, stateStackSize, H, W], original_RND: [num_env, 1, H, W]
 
             # Compute normalize obs, compute intrinsic rewards and clip them (note that: total reward = int reward + ext reward)
             if train_method == 'original_RND':
@@ -629,18 +650,18 @@ def main(args):
                         ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
 
             if train_method in ['original_RND', 'modified_RND']:
-                intrinsic_reward = np.hstack(intrinsic_reward) # [num_env,]
+                total_int_reward[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = intrinsic_reward[:]
+                total_next_obs[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = next_obs[:]
+                # total_next_obs --> modified_RND: [num_step, num_env, state_stack_size, H, W], original_RND: [num_step, num_env, 1, H, W]
 
-            total_next_obs.append(next_obs) # --> modified_RND: [num_step, num_env, state_stack_size, H, W], original_RND: [num_step, num_env, 1, H, W]
-            if train_method in ['original_RND', 'modified_RND']:
-                total_int_reward.append(intrinsic_reward)
-            total_state.append(states)
-            total_reward.append(rewards)
-            total_done.append(dones)
-            total_action.append(actions)
-            total_ext_values.append(value_ext)
-            total_int_values.append(value_int)
-            total_policy.append(policy)
+            total_state[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = states[:]
+            total_reward[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = rewards[:]
+
+            total_done[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = dones[:]
+            total_action[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = actions[:]
+            total_ext_values[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = value_ext[:]
+            total_int_values[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = value_int[:]
+            total_policy[(step * num_env_workers) : (step * num_env_workers) + num_env_workers] = policy[:]
 
             states = next_states[:, :, :, :] # for an explanation of why [:, :, :, :] is used refer to the discussion: https://stackoverflow.com/questions/61103275/what-is-the-difference-between-tensor-and-tensor-in-pytorch 
 
@@ -656,23 +677,23 @@ def main(args):
         # calculate last next value
         with torch.no_grad():
             _, value_ext, value_int, _ = agent.module.get_action(np.float32(states) / 255.)
-        total_ext_values.append(value_ext)
-        total_int_values.append(value_int)
+        total_ext_values[((step+1) * num_env_workers) : ((step+1) * num_env_workers) + num_env_workers] = value_ext
+        total_int_values[((step+1) * num_env_workers) : ((step+1) * num_env_workers) + num_env_workers] = value_int
         # --------------------------------------------------
 
-        total_state = np.stack(total_state).transpose([1, 0, 2, 3, 4]).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
-        total_reward = np.stack(total_reward).transpose().clip(-1, 1) # --> [num_env, num_step]
-        total_action = np.stack(total_action).transpose().reshape([-1]) # --> [num_env * num_step]
-        total_done = np.stack(total_done).transpose() # --> [num_env, num_step]
+        total_state = total_state.reshape([num_step, num_env_workers, stateStackSize, input_size, input_size]).transpose(1, 0, 2, 3, 4).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
+        total_reward = total_reward.reshape([num_step, num_env_workers]).transpose().clip(-1, 1) # --> [num_env, num_step]
+        total_action = total_action.reshape([num_step, num_env_workers]).transpose().reshape([-1]) # --> [num_env * num_step]
+        total_done = total_done.reshape([num_step, num_env_workers]).transpose().reshape([num_env_workers, num_step])
         if train_method == 'original_RND':
-            total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, 1, input_size, input_size]) # --> [num_env * num_step, 1, H, W]
+            total_next_obs = total_next_obs.reshape([num_step, num_env_workers, 1, input_size, input_size]).transpose([1, 0, 2, 3, 4]).reshape([num_env_workers * num_step, 1, input_size, input_size]) # --> [num_env * num_step, 1, H, W]
             assert (list(total_next_obs.shape) == [num_env_workers*num_step, 1, input_size, input_size]) and (total_next_obs.dtype == np.float64)
         elif train_method == 'modified_RND':
-            total_next_obs = np.stack(total_next_obs).transpose([1, 0, 2, 3, 4]).reshape([-1, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
+            total_next_obs = total_next_obs.reshape([num_step, num_env_workers, stateStackSize, input_size, input_size]).transpose([1, 0, 2, 3, 4]).reshape([num_env_workers * num_step, stateStackSize, input_size, input_size]) # --> [num_env * num_step, state_stack_size, H, W]
             assert (list(total_next_obs.shape) == [num_env_workers*num_step, stateStackSize, input_size, input_size]) and (total_next_obs.dtype == np.float64)
-        total_ext_values = np.stack(total_ext_values).transpose() # --> [num_env, (num_step + 1)]
-        total_int_values = np.stack(total_int_values).transpose() # --> [num_env, (num_step + 1)]
-        total_policy = np.stack(total_policy) # --> [num_step, num_env, output_size]
+        total_ext_values = total_ext_values.reshape([(num_step + 1), num_env_workers]).transpose().reshape(num_env_workers, (num_step + 1))
+        total_int_values = total_int_values.reshape([(num_step + 1), num_env_workers]).transpose().reshape(num_env_workers, (num_step + 1))
+        total_policy = total_policy.reshape([num_step, num_env_workers, -1]) # --> [num_step, num_env, output_size]
         assert (list(total_state.shape) == [num_env_workers*num_step, stateStackSize, input_size, input_size]) and (total_state.dtype == np.float64)
         assert (list(total_reward.shape) == [num_env_workers, num_step]) and (total_reward.dtype == np.float64)
         assert (list(total_done.shape) == [num_env_workers, num_step]) and (total_done.dtype == np.bool_)
@@ -689,7 +710,7 @@ def main(args):
         # Step 2. calculate intrinsic reward
         if train_method in ['original_RND', 'modified_RND']:
             # running mean intrinsic reward
-            total_int_reward = np.stack(total_int_reward).transpose() # --> [num_env, num_step]
+            total_int_reward = total_int_reward.reshape([num_step, num_env_workers]).transpose().reshape([num_env_workers, num_step]) # --> [num_env, num_step]
             total_reward_per_env = np.array([discounted_reward.update(reward_per_step) for reward_per_step in
                                             total_int_reward.T])
             mean, std, count = np.mean(total_reward_per_env), np.std(total_reward_per_env), len(total_reward_per_env)
