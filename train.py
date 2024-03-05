@@ -120,10 +120,10 @@ def main(args):
 
     reward_rms = RunningMeanStd(usage='reward_rms') # used for normalizing intrinsic rewards
     if train_method == 'original_RND':
-        obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size), usage='obs_rms') # used for normalizing observations
+        obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size), usage='obs_rms') # used for normalizing inputs to RND module (i.e. extracted_feature_embeddings)
     elif train_method == 'modified_RND':
         extracted_feature_embedding_dim = CnnActorCriticNetwork.extracted_feature_embedding_dim
-        obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim), usage='obs_rms') # used for normalizing observations
+        obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim), usage='obs_rms') # used for normalizing inputs to RND module (i.e. extracted_feature_embeddings)
     elif train_method == 'PPO':
         obs_rms = None
     pre_obs_norm_step = int(default_config['ObsNormStep'])
@@ -761,11 +761,13 @@ def main(args):
         if logger.use_wandb and GLOBAL_RANK == 0:
             parameterUpdates_log_dict = {
                 'data/Mean of rollout rewards (extrinsic) vs Parameter updates': np.mean(total_reward),
+                'data/Sum of rollout rewards (extrinsic) vs Parameter updates': np.sum(total_reward),
             }
             if train_method in ['original_RND', 'modified_RND']:
                 parameterUpdates_log_dict = {
                     **parameterUpdates_log_dict,
                     'data/Mean of rollout rewards (intrinsic) vs Parameter updates': np.mean(total_int_reward),
+                    'data/Sum of rollout rewards (intrinsic) vs Parameter updates': np.sum(total_int_reward),
                 } 
             if len(episode_lengths) > 0: # check if any episode has been completed yet
                 parameterUpdates_log_dict = {
@@ -783,13 +785,16 @@ def main(args):
             parameterUpdates_log_dict = {f'wandb_{k}': v for (k, v) in parameterUpdates_log_dict.items()}
             wandb.log({
                 'parameter updates': global_update,
+                'total_num_steps_taken': global_step,
                 **parameterUpdates_log_dict
             })
 
         # Logging (tb):
         logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (extrinsic) vs Parameter updates', np.mean(total_reward), global_update, only_rank_0=True)
+        logger.log_scalar_to_tb_with_step('data/Sum of rollout rewards (extrinsic) vs Parameter updates', np.sum(total_reward), global_update, only_rank_0=True)
         if train_method in ['original_RND', 'modified_RND']:
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
+            logger.log_scalar_to_tb_with_step('data/Sum of rollout rewards (intrinsic) vs Parameter updates', np.sum(total_int_reward), global_update, only_rank_0=True)
         if len(episode_lengths) > 0: # check if any episode has been completed yet
             logger.log_scalar_to_tb_with_step('data/Mean undiscounted episodic return (over last 100 episodes) (extrinsic) vs Parameter updates', np.mean(undiscounted_episode_return), global_update, only_rank_0=True)
             logger.log_scalar_to_tb_with_step('data/Mean episode lengths (over last 100 episodes) vs Parameter updates', np.mean(episode_lengths), global_update, only_rank_0=True)

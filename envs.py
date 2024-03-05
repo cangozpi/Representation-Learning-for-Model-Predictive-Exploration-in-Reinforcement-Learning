@@ -263,11 +263,11 @@ class AtariEnvironment(Environment):
         self.GLOBAL_WORLD_SIZE, self.GLOBAL_RANK, self.LOCAL_WORLD_SIZE, self.LOCAL_RANK = get_dist_info()
 
         self.env = gym.make(env_id, render_mode="rgb_array" if is_render else None)
-        # if sticky_action:
-        #     self.env = StickyActionWrapper(self.env, p)
-        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
         if sticky_action:
             self.env = StickyActionWrapper(self.env, p)
+        self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
+        # if sticky_action:
+        #     self.env = StickyActionWrapper(self.env, p)
         self.env = ResizeAndGrayScaleWrapper(self.env, h, w)
         # self.env = MaxAndSkipEnv(self.env, is_render, skip=4)
         self.env = FrameStackWrapper(self.env, history_size)

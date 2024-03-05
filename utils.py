@@ -256,6 +256,8 @@ class Logger:
             wandb.define_metric('wandb_SSL_pretraining/*', step_metric='SSL_pretraining_epoch')
             wandb.define_metric('SSL_pretraining/*', step_metric='SSL_pretraining_epoch')
 
+            wandb.define_metric('total_num_steps_taken')
+
         # Initialize TensorBoard --------------------------------------------------------------------
         if tb_log_path is not None:
             # run_name =  datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
