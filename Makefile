@@ -64,4 +64,5 @@ start_tensorboard_profiles:
 	tensorboard --logdir=./logs/torch_profiler_logs
 
 run_tests:
-	python3 test.py --train
+	# python3 test.py --train --config_path=./configs/demo_config.conf --debug_params
+	torchrun --nnodes 1 --nproc_per_node 1 --standalone test.py --train --config_path=./configs/demo_config.conf --debug_params

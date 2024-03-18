@@ -768,6 +768,11 @@ def main(args):
                     **parameterUpdates_log_dict,
                     'data/Mean of rollout rewards (intrinsic) vs Parameter updates': np.mean(total_int_reward),
                     'data/Sum of rollout rewards (intrinsic) vs Parameter updates': np.sum(total_int_reward),
+                    'data/Max of rollout rewards (intrinsic) vs Parameter updates': np.max(total_int_reward),
+                    'data/np.mean(obs_rms.mean) vs Parameter updates': np.mean(obs_rms.mean),
+                    'data/np.mean(obs_rms.var) vs Parameter updates': np.mean(obs_rms.var),
+                    'data/np.mean(reward_rms.mean) vs Parameter updates': np.mean(reward_rms.mean),
+                    'data/np.mean(reward_rms.var) vs Parameter updates': np.mean(reward_rms.var),
                 } 
             if len(episode_lengths) > 0: # check if any episode has been completed yet
                 parameterUpdates_log_dict = {
@@ -795,6 +800,11 @@ def main(args):
         if train_method in ['original_RND', 'modified_RND']:
             logger.log_scalar_to_tb_with_step('data/Mean of rollout rewards (intrinsic) vs Parameter updates', np.mean(total_int_reward), global_update, only_rank_0=True)
             logger.log_scalar_to_tb_with_step('data/Sum of rollout rewards (intrinsic) vs Parameter updates', np.sum(total_int_reward), global_update, only_rank_0=True)
+            logger.log_scalar_to_tb_with_step('data/Max of rollout rewards (intrinsic) vs Parameter updates', np.max(total_int_reward), global_update, only_rank_0=True)
+            logger.log_scalar_to_tb_with_step('data/np.mean(obs_rms.mean) vs Parameter updates', np.mean(obs_rms.mean), global_update, only_rank_0=True)
+            logger.log_scalar_to_tb_with_step('data/np.mean(obs_rms.var) vs Parameter updates', np.mean(obs_rms.var), global_update, only_rank_0=True)
+            logger.log_scalar_to_tb_with_step('data/np.mean(reward_rms.mean) vs Parameter updates', np.mean(reward_rms.mean), global_update, only_rank_0=True)
+            logger.log_scalar_to_tb_with_step('data/np.mean(reward_rms.var) vs Parameter updates', np.mean(reward_rms.var), global_update, only_rank_0=True)
         if len(episode_lengths) > 0: # check if any episode has been completed yet
             logger.log_scalar_to_tb_with_step('data/Mean undiscounted episodic return (over last 100 episodes) (extrinsic) vs Parameter updates', np.mean(undiscounted_episode_return), global_update, only_rank_0=True)
             logger.log_scalar_to_tb_with_step('data/Mean episode lengths (over last 100 episodes) vs Parameter updates', np.mean(episode_lengths), global_update, only_rank_0=True)

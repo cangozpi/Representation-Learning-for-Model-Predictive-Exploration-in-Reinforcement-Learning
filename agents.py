@@ -300,7 +300,7 @@ class RNDAgent(nn.Module):
 
         target_next_feature = self.rnd.target(next_obs)
         predict_next_feature = self.rnd.predictor(next_obs)
-        intrinsic_reward = (target_next_feature - predict_next_feature).pow(2).sum(1) / 2
+        intrinsic_reward = (target_next_feature - predict_next_feature).pow(2).mean(1)
 
         return intrinsic_reward.data.cpu().numpy()
     
@@ -329,7 +329,7 @@ class RNDAgent(nn.Module):
             np.random.shuffle(sample_range)
 
             total_loss, total_actor_loss, total_critic_loss, total_critic_loss_int, total_critic_loss_ext, total_entropy_loss, total_rnd_loss, total_representation_loss, \
-                total_approx_kl, total_entropy = [], [], [], [], [], [], [], [], [], []
+                total_approx_kl, total_max_kl, total_entropy, total_clipfrac = [], [], [], [], [], [], [], [], [], [], [], []
             total_grad_norm_unclipped = []
             if default_config.getboolean('UseGradClipping'):
                 total_grad_norm_clipped = []
@@ -389,6 +389,21 @@ class RNDAgent(nn.Module):
                     mask = torch.rand(len(rnd_loss)).to(self.device)
                     mask = (mask < self.update_proportion).type(torch.FloatTensor).to(self.device)
                     rnd_loss = (rnd_loss * mask).sum() / torch.max(mask.sum(), torch.Tensor([1]).to(self.device))
+                    # Diagnostic metrics to log:
+                    with torch.no_grad():
+                        rnd_target_features_batch_dim_variance = torch.mean(torch.var(target_next_state_feature.detach(), dim=0)).cpu().numpy()
+                        rnd_target_features_feat_dim_variance = torch.mean(torch.var(target_next_state_feature.detach(), dim=1)).cpu().numpy()
+                        rnd_target_features_mean = torch.mean(target_next_state_feature.detach()).cpu().numpy()
+                        rnd_target_features_max = torch.max(torch.abs(target_next_state_feature.detach())).cpu().numpy()
+                        rnd_pred_features_batch_dim_variance = torch.mean(torch.var(predict_next_state_feature.detach(), dim=0)).cpu().numpy()
+                        rnd_pred_features_feat_dim_variance = torch.mean(torch.var(predict_next_state_feature.detach(), dim=1)).cpu().numpy()
+                        rnd_pred_features_mean = torch.mean(predict_next_state_feature.detach()).cpu().numpy()
+                        rnd_pred_features_max = torch.max(torch.abs(predict_next_state_feature.detach())).cpu().numpy()
+                        rnd_input_flattened = torch.reshape(normalized_extracted_feature_embeddings_batch, (normalized_extracted_feature_embeddings_batch.shape[0], -1)).detach() # [B, *]
+                        rnd_input_batch_dim_variance = torch.mean(torch.var(rnd_input_flattened, dim=0)).cpu().numpy()
+                        rnd_input_feat_dim_variance = torch.mean(torch.var(rnd_input_flattened, dim=1)).cpu().numpy()
+                        rnd_input_mean = torch.mean(rnd_input_flattened).cpu().numpy()
+                        rnd_input_max = torch.max(torch.abs(rnd_input_flattened)).cpu().numpy()
                 # ---------------------------------------------------------------------------------
 
 
@@ -516,8 +531,13 @@ class RNDAgent(nn.Module):
 
                 critic_loss = critic_ext_loss + critic_int_loss
 
-                entropy = m.entropy().mean()
-                approx_kl = (log_prob_old - log_prob).detach().mean().item()
+                entropy = m.entropy().mean() # note that this is used both for loss calculation and logging
+                # PPO's diagnostic logging metrics (refer to: https://spinningup.openai.com/en/latest/_modules/spinup/algos/pytorch/ppo/ppo.html):
+                with torch.no_grad():
+                    approx_kl = (log_prob_old - log_prob).detach().mean().item()
+                    max_kl = (log_prob_old - log_prob).detach().max().item()
+                    clipped = ratio.gt(1+self.ppo_eps) | ratio.lt(1-self.ppo_eps)
+                    clipfrac = torch.as_tensor(clipped, dtype=torch.float32).mean().item()
                 # --------------------------------------------------------------------------------
 
                 self.optimizer.zero_grad()
@@ -562,6 +582,8 @@ class RNDAgent(nn.Module):
                 total_entropy_loss.append(- self.ent_coef * entropy.detach().cpu().item())
                 total_entropy.append(entropy.detach().cpu().item())
                 total_approx_kl.append(approx_kl)
+                total_max_kl.append(max_kl)
+                total_clipfrac.append(clipfrac)
                 if self.rnd is not None:
                     total_rnd_loss.append(rnd_loss.detach().cpu().item())
                 if self.representation_model is not None:
@@ -577,7 +599,7 @@ class RNDAgent(nn.Module):
 
                 self.logger.step_pytorch_profiler(pytorch_profiler_log_path)
 
-            
+
             # logging (wandb):
             if self.logger.use_wandb and GLOBAL_RANK == 0:
                 epoch_log_dict = {
@@ -588,12 +610,28 @@ class RNDAgent(nn.Module):
                     'train/PPO_entropy_loss vs epoch': np.mean(total_entropy_loss),
                     'train/PPO entropy vs epoch': np.mean(total_entropy),
                     'train/PPO approximate_KL vs epoch': np.mean(total_approx_kl),
+                    'train/PPO max_KL vs epoch': np.max(total_max_kl),
+                    'train/PPO clipfrac vs epoch': np.mean(total_clipfrac),
+                    'train/grad_norm_unclipped vs epoch': np.mean(total_grad_norm_unclipped),
+                    'train/rnd_target_features_batch_dim_variance vs epoch': rnd_target_features_batch_dim_variance,
+                    'train/rnd_target_features_feat_dim_variance vs epoch': rnd_target_features_feat_dim_variance,
+                    'train/rnd_target_features_mean vs epoch': rnd_target_features_mean,
+                    'train/rnd_target_features_max vs epoch': rnd_target_features_max,
+                    'train/rnd_pred_features_batch_dim_variance vs epoch': rnd_pred_features_batch_dim_variance,
+                    'train/rnd_pred_features_feat_dim_variance vs epoch': rnd_pred_features_feat_dim_variance,
+                    'train/rnd_pred_features_mean vs epoch': rnd_pred_features_mean,
+                    'train/rnd_pred_features_max vs epoch': rnd_pred_features_max,
                 }
                 if self.rnd is not None:
                     epoch_log_dict = {
                         **epoch_log_dict,
                         'train/PPO_critic_loss (intrtinsic) vs epoch': np.mean(total_critic_loss_int),
-                        'train/RND_loss vs epoch': np.mean(total_rnd_loss)
+                        'train/RND_loss vs epoch': np.mean(total_rnd_loss),
+                        'train/rnd_input.mean vs epoch': np.mean(normalized_extracted_feature_embeddings_batch),
+                        'train/rnd_input_batch_dim_variance vs epoch': rnd_input_batch_dim_variance,
+                        'train/rnd_input_feat_dim_variance vs epoch': rnd_input_feat_dim_variance,
+                        'train/rnd_input_mean vs epoch': rnd_input_mean,
+                        'train/rnd_input_max vs epoch': rnd_input_max,
                     }
                 if self.representation_model is not None:
                     epoch_log_dict = {
@@ -606,15 +644,10 @@ class RNDAgent(nn.Module):
                         'train/Number of gradient projections in the last 100 epochs vs epoch': np.sum(num_gradient_projections_in_last_100_epochs),
                         'train/Mean cos_theta of gradient projections in the last 100 epochs vs epoch': np.mean(mean_costheta_of_gradient_projections_in_last_100_epochs),
                     }
-                if default_config.getboolean('verbose_logging') == True:
+                if default_config.getboolean('UseGradClipping') == True:
                     epoch_log_dict = {
                         **epoch_log_dict,
-                        'grads/grad_norm_unclipped': np.mean(total_grad_norm_unclipped),
-                    }
-                    if default_config.getboolean('UseGradClipping') == True:
-                        epoch_log_dict = {
-                            **epoch_log_dict,
-                            'grads/grad_norm_clipped': np.mean(total_grad_norm_clipped)
+                        'train/grad_norm_clipped vs epoch': np.mean(total_grad_norm_clipped),
                         }
                 epoch_log_dict = {f'wandb_{k}': v for (k, v) in epoch_log_dict.items()}
                 epoch = self.logger.tb_global_steps['epoch']
@@ -632,18 +665,32 @@ class RNDAgent(nn.Module):
             self.logger.log_scalar_to_tb_without_step('train/PPO_entropy_loss vs epoch', np.mean(total_entropy_loss), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO entropy vs epoch', np.mean(total_entropy), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO approximate_KL vs epoch', np.mean(total_approx_kl), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO max_KL vs epoch', np.max(total_max_kl), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/PPO clipfrac vs epoch', np.mean(total_clipfrac), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/grad_norm_unclipped vs epoch', np.mean(total_grad_norm_unclipped), only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_batch_dim_variance vs epoch', rnd_target_features_batch_dim_variance, only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_feat_dim_variance vs epoch', rnd_target_features_feat_dim_variance, only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_mean vs epoch', rnd_target_features_mean, only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_max vs epoch', rnd_target_features_max, only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_batch_dim_variance vs epoch', rnd_pred_features_batch_dim_variance, only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_feat_dim_variance vs epoch', rnd_pred_features_feat_dim_variance, only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_mean vs epoch', rnd_pred_features_mean, only_rank_0=True)
+            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_max vs epoch', rnd_pred_features_max, only_rank_0=True)
             if self.rnd is not None:
                 self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_input_batch_dim_variance vs epoch', rnd_input_batch_dim_variance, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_input_feat_dim_variance vs epoch', rnd_input_feat_dim_variance, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_input_mean vs epoch', rnd_input_mean, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_input_max vs epoch', rnd_input_max, only_rank_0=True)
             if self.representation_model is not None:
                 self.logger.log_scalar_to_tb_without_step(f'train/Representation_loss({self.representation_lr_method}) vs epoch', np.mean(total_representation_loss), only_rank_0=True)
             if default_config.getboolean('use_gradient_projection') == True:
                 self.logger.log_scalar_to_tb_without_step('train/Number of gradient projections in the last 100 epochs vs epoch', np.sum(num_gradient_projections_in_last_100_epochs), only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/Mean cos_theta of gradient projections in the last 100 epochs vs epoch', np.mean(mean_costheta_of_gradient_projections_in_last_100_epochs), only_rank_0=True)
+            if default_config.getboolean('UseGradClipping') == True:
+                self.logger.log_scalar_to_tb_without_step('train/grad_norm_clipped vs epoch', np.mean(total_grad_norm_clipped), only_rank_0=True)
             if default_config.getboolean('verbose_logging') == True:
-                self.logger.log_scalar_to_tb_without_step('grads/grad_norm_unclipped', np.mean(total_grad_norm_unclipped), only_rank_0=True)
-                if default_config.getboolean('UseGradClipping') == True:
-                    self.logger.log_scalar_to_tb_without_step('grads/grad_norm_clipped', np.mean(total_grad_norm_clipped), only_rank_0=True)
                 # Log final model parameters in detail
                 self.logger.log_parameters_in_model_to_tb_without_step(self.model, f'PPO', only_rank_0=True)
                 if self.rnd is not None:

@@ -183,6 +183,9 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
 
 * __Tests__
     * _tests.py_: This file contains some tests for environment wrappers and custom environment implementations.
+    ```bash
+    make run_tests
+    ```
 
 ---
 

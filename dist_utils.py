@@ -101,8 +101,8 @@ def create_parallel_env_processes(num_env_per_process, env_type, env_id, sticky_
         parent_conn, child_conn = Pipe()
         
         from copy import deepcopy
-        env_worker = env_type(env_id=env_id, is_render=False, env_idx=GLOBAL_RANK, sticky_action=sticky_action, p=action_prob, h=input_size, w=input_size,
-                            life_done=life_done, history_size=stateStackSize, seed=seed+idx, child_conn=child_conn) # Note that seed+rank is required to make parallel envs play different scenarios
+        env_worker = env_type(env_id=env_id, is_render=False, env_idx=(GLOBAL_RANK*num_env_per_process)+idx, sticky_action=sticky_action, p=action_prob, h=input_size, w=input_size,
+                            life_done=life_done, history_size=stateStackSize, seed=seed+((GLOBAL_RANK*num_env_per_process)+idx), child_conn=child_conn) # Note that seed+rank is required to make parallel envs play different scenarios
         env_worker.start()
         env_workers.append(env_worker)
         parent_conns.append(parent_conn)
