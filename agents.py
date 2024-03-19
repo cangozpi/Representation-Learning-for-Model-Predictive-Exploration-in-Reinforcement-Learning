@@ -613,21 +613,20 @@ class RNDAgent(nn.Module):
                     'train/PPO max_KL vs epoch': np.max(total_max_kl),
                     'train/PPO clipfrac vs epoch': np.mean(total_clipfrac),
                     'train/grad_norm_unclipped vs epoch': np.mean(total_grad_norm_unclipped),
-                    'train/rnd_target_features_batch_dim_variance vs epoch': rnd_target_features_batch_dim_variance,
-                    'train/rnd_target_features_feat_dim_variance vs epoch': rnd_target_features_feat_dim_variance,
-                    'train/rnd_target_features_mean vs epoch': rnd_target_features_mean,
-                    'train/rnd_target_features_max vs epoch': rnd_target_features_max,
-                    'train/rnd_pred_features_batch_dim_variance vs epoch': rnd_pred_features_batch_dim_variance,
-                    'train/rnd_pred_features_feat_dim_variance vs epoch': rnd_pred_features_feat_dim_variance,
-                    'train/rnd_pred_features_mean vs epoch': rnd_pred_features_mean,
-                    'train/rnd_pred_features_max vs epoch': rnd_pred_features_max,
                 }
                 if self.rnd is not None:
                     epoch_log_dict = {
                         **epoch_log_dict,
                         'train/PPO_critic_loss (intrtinsic) vs epoch': np.mean(total_critic_loss_int),
                         'train/RND_loss vs epoch': np.mean(total_rnd_loss),
-                        'train/rnd_input.mean vs epoch': np.mean(normalized_extracted_feature_embeddings_batch),
+                        'train/rnd_target_features_batch_dim_variance vs epoch': rnd_target_features_batch_dim_variance,
+                        'train/rnd_target_features_feat_dim_variance vs epoch': rnd_target_features_feat_dim_variance,
+                        'train/rnd_target_features_mean vs epoch': rnd_target_features_mean,
+                        'train/rnd_target_features_max vs epoch': rnd_target_features_max,
+                        'train/rnd_pred_features_batch_dim_variance vs epoch': rnd_pred_features_batch_dim_variance,
+                        'train/rnd_pred_features_feat_dim_variance vs epoch': rnd_pred_features_feat_dim_variance,
+                        'train/rnd_pred_features_mean vs epoch': rnd_pred_features_mean,
+                        'train/rnd_pred_features_max vs epoch': rnd_pred_features_max,
                         'train/rnd_input_batch_dim_variance vs epoch': rnd_input_batch_dim_variance,
                         'train/rnd_input_feat_dim_variance vs epoch': rnd_input_feat_dim_variance,
                         'train/rnd_input_mean vs epoch': rnd_input_mean,
@@ -668,17 +667,17 @@ class RNDAgent(nn.Module):
             self.logger.log_scalar_to_tb_without_step('train/PPO max_KL vs epoch', np.max(total_max_kl), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/PPO clipfrac vs epoch', np.mean(total_clipfrac), only_rank_0=True)
             self.logger.log_scalar_to_tb_without_step('train/grad_norm_unclipped vs epoch', np.mean(total_grad_norm_unclipped), only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_batch_dim_variance vs epoch', rnd_target_features_batch_dim_variance, only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_feat_dim_variance vs epoch', rnd_target_features_feat_dim_variance, only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_mean vs epoch', rnd_target_features_mean, only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_max vs epoch', rnd_target_features_max, only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_batch_dim_variance vs epoch', rnd_pred_features_batch_dim_variance, only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_feat_dim_variance vs epoch', rnd_pred_features_feat_dim_variance, only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_mean vs epoch', rnd_pred_features_mean, only_rank_0=True)
-            self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_max vs epoch', rnd_pred_features_max, only_rank_0=True)
             if self.rnd is not None:
                 self.logger.log_scalar_to_tb_without_step('train/PPO_critic_loss (intrtinsic) vs epoch', np.mean(total_critic_loss_int), only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/RND_loss vs epoch', np.mean(total_rnd_loss), only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_batch_dim_variance vs epoch', rnd_target_features_batch_dim_variance, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_feat_dim_variance vs epoch', rnd_target_features_feat_dim_variance, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_mean vs epoch', rnd_target_features_mean, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_target_features_max vs epoch', rnd_target_features_max, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_batch_dim_variance vs epoch', rnd_pred_features_batch_dim_variance, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_feat_dim_variance vs epoch', rnd_pred_features_feat_dim_variance, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_mean vs epoch', rnd_pred_features_mean, only_rank_0=True)
+                self.logger.log_scalar_to_tb_without_step('train/rnd_pred_features_max vs epoch', rnd_pred_features_max, only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/rnd_input_batch_dim_variance vs epoch', rnd_input_batch_dim_variance, only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/rnd_input_feat_dim_variance vs epoch', rnd_input_feat_dim_variance, only_rank_0=True)
                 self.logger.log_scalar_to_tb_without_step('train/rnd_input_mean vs epoch', rnd_input_mean, only_rank_0=True)
