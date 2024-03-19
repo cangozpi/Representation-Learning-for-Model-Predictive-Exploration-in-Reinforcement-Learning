@@ -21,7 +21,7 @@ def main(args):
     logger = Logger(file_log_path=path.join("logs", "file_logs", args['log_name']), tb_log_path=path.join("logs", "tb_logs", args['log_name']))
 
     use_cuda = default_config.getboolean('UseGPU')
-    GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id = ddp_setup(logger, use_cuda)
+    GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id = ddp_setup(logger, use_cuda, int(args['gpu_id']))
     
     dist.barrier() # wait for process initialization logging inside ddp_setup() to finish
 

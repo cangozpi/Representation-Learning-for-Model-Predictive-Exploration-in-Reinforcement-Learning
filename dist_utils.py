@@ -14,7 +14,7 @@ def get_dist_info():
     return GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK
 
 
-def ddp_setup(logger, use_cuda):
+def ddp_setup(logger, use_cuda, gpu_id):
     """
     Setups torch.distributed and creates p_groups for training.
     In every node, the processes created by torch distributed (i.e. processes belonging to the default process group), will act 
@@ -61,9 +61,13 @@ def ddp_setup(logger, use_cuda):
     if use_cuda:
         assert torch.cuda.is_available() == True, "use_cuda:True is passed but cuda is not available !"
 
-    if torch.cuda.is_available() and use_cuda:
+    if torch.cuda.is_available() and use_cuda and (gpu_id == -1):
         gpu_id = "cuda:" + str(LOCAL_RANK % torch.cuda.device_count())
         backend = "nccl"
+    elif torch.cuda.is_available() and use_cuda and (gpu_id != -1):
+        gpu_id = "cuda:" + str(gpu_id)
+        backend = "nccl"
+        assert GLOBAL_WORLD_SIZE == 1, "when --gpu_id is passed then the GLOBAL_WORLD_SIZE must be 1"
     else:
         gpu_id = "cpu"
         backend = "gloo"

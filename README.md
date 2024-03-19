@@ -46,6 +46,12 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
     ```
 * Note that this examples uses 1 node and 128 processes in total. It will have 1 process as agent/trainer and another 127 processes as environment workers. You can modify the parameters of torchrun to suit your needs.
 
+By default, if your machine has more than 1 GPU then automatically a unique GPU will be assigned per trainer process. In order to use a specific GPU, you should pass _--gpu_id=*_ command line parameter and must have _GLOBAL_WORLD_SIZE == 1_.
+* Train RND agent in MontezumaRevenge from scratch using only the GPU _cuda:1_:
+    ```bash
+    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt --gpu_id=1
+    ```
+
 ---
 * Test a RND agent in MontezumaRevenge:
     ```bash

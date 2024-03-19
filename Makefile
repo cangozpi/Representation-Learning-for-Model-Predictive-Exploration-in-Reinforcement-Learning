@@ -17,6 +17,10 @@ train:
 	# torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt 
 	torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt 
 
+train_with_specific_gpu:
+	# torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt 
+	torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --gpu_id=0
+
 continue_training:
 	# torchrun --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00_cont00 --load_model_path=checkpoints/demo_00.ckpt --save_model_path=checkpoints/demo_00_cont00.ckpt 
 	# torchrun --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00_cont00 --load_model_path=checkpoints/demo_00__BestModelForMeanExtrinsicRolloutRewards.ckpt --save_model_path=checkpoints/demo_00_cont00.ckpt 
