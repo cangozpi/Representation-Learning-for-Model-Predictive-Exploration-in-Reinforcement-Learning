@@ -276,7 +276,22 @@ def main(args):
     agent.module.set_mode("train")
 
 
+    # Get the initial reset states from newly initialized envs
     states = np.zeros([num_env_workers, stateStackSize, input_size, input_size])
+    for env_idx, parent_conn in enumerate(env_worker_parent_conns):
+        s = parent_conn.recv()
+        assert (list(s.shape) == [stateStackSize, input_size, input_size]) and (s.dtype == np.float64)
+        states[env_idx] = s[:]
+
+    # plots states for debugging purposes
+    if False:
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(3, 4)
+        for env_idx in range(num_env_workers):
+            for stack_idx in range(stateStackSize):
+                axs[env_idx, stack_idx].imshow(np.expand_dims(states[env_idx, stack_idx], axis=2), cmap='gray')
+                axs[env_idx, stack_idx].set_title(f'env: {env_idx}, frame: {stack_idx}', fontsize=10)
+        plt.show()
 
     # SSL pretraining:
     if SSL_pretraining == True:

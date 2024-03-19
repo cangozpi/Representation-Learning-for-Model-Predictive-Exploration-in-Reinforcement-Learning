@@ -296,7 +296,7 @@ class AtariEnvironment(Environment):
         self.seed = seed
         # self.env.seed = seed
         # self.reset()
-        self.reset(seed=seed)
+        self.initial_state, _info = self.reset(seed=seed)
         # self.env.seed(seed)
 
 
@@ -304,6 +304,10 @@ class AtariEnvironment(Environment):
     # @record
     def run(self):
         super(AtariEnvironment, self).run()
+
+        self.child_conn.send(self.initial_state) # send the initial reset state of the newly initialized env
+        del self.initial_state
+
         while True:
             action = self.child_conn.recv()
             # assert ...
@@ -397,12 +401,16 @@ class MarioEnvironment(Environment):
         self.seed = seed
         # self.env.seed = seed
         # self.reset()
-        self.reset(seed=seed)
+        self.initial_state, _info = self.reset(seed=seed)
         # self.env.seed(seed)
 
 
     def run(self):
         super(MarioEnvironment, self).run()
+
+        self.child_conn.send(self.initial_state) # send the initial reset state of the newly initialized env
+        del self.initial_state
+
         while True:
             action = self.child_conn.recv()
             # assert ...
@@ -526,11 +534,15 @@ class ClassicControlEnvironment(Environment):
         self.seed = seed
         # self.env.seed = seed
         # self.reset()
-        self.reset(seed=seed)
+        self.initial_state, _info = self.reset(seed=seed)
         # self.env.seed(seed)
 
     def run(self):
         super(ClassicControlEnvironment, self).run()
+
+        self.child_conn.send(self.initial_state) # send the initial reset state of the newly initialized env
+        del self.initial_state
+
         while True:
             action = self.child_conn.recv()
             # assert ...
