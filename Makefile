@@ -35,7 +35,11 @@ scalene_profiling:
 	# python -m scalene --- -m torch.distributed.run --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
 	# python -m scalene --no-browser --cpu --gpu --memory --outfile scaleneProfiler00_rnd00.html --profile-interval 10 --- -m torch.distributed.run --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
 	# python -m scalene --no-browser --outfile scaleneProfiler00_rnd00.html --- -m torch.distributed.run --nnodes 1 --nproc_per_node 3 --standalone main.py --train --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
-	python -m scalene --no-browser --outfile scaleneProfiler00_rnd00.html --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
+	# python -m scalene --no-browser --outfile scaleneProfiler00_rnd00.html --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
+	python -m scalene --profile-all --cli --json --outfile scaleneProfiler00_rnd00.json --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
+
+view_scalene:
+	scalene --viewer
 
 test:
 	torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --eval --num_env_per_process 1 --config_path=./configs/demo_config.conf --log_name=demo_test_00 --load_model_path=checkpoints/demo_00.ckpt

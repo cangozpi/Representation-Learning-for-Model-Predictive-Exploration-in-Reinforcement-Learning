@@ -66,14 +66,19 @@ By default, if your machine has more than 1 GPU then automatically a unique GPU 
         ```bash
         python -m scalene --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
         ```
-    * Logs are not opened on the browser but are logged to an output file:
+    * Logs are not opened on the browser but are logged to an output file (json):
         ```bash
-        python -m scalene --no-browser --outfile scaleneProfiler00_rnd00.html --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
+        python -m scalene --profile-all --cli --json --outfile scaleneProfiler00_rnd00.json --- -m torch.distributed.run --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt --scalene_profiling 3
         ```
         or
         ```bash
         make scalene_profiling
         ```
+    * Then the logged outputs (json) can be visualized in the browser by running:
+    ```bash
+    scalene --viewer
+    ```
+    and inputting the json file (e.g. _scaleneProfiler00_rnd00.json_)
 
 * Profiling with Pytorch Profiler (torchrun Example):
     ```bash
@@ -87,11 +92,6 @@ By default, if your machine has more than 1 GPU then automatically a unique GPU 
         ```bash
         make start_tensorboard_profiles
         ```
-
-* Profiling with Scalene options example (not suitable for our torchrun code):
-    ```bash
-    scalene --no-browser --cpu --gpu --memory --outfile profile_rnd_montezuma.html --profile-interval 120 main.py --train --config_path=./configs/demo_config.conf --log_name=rnd00 --save_model_path=checkpoints/rnd00.ckpt
-    ```
 ---
 
 ### Some helper commands

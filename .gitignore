@@ -42,7 +42,7 @@ lib/
 *.swo
 
 profile*.html
-profile*.json
+*[pP]rofile*.json
 *.html
 
 hpc_stuff*
