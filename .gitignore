@@ -41,9 +41,17 @@ lib/
 *.swp
 *.swo
 
-profile*.html
+# for scalene profiler:
+*[pP]rofile*.html
 *[pP]rofile*.json
 *.html
+# for py-spy and its flamegraph output:
+*[pP]rofile*.svg
+# for python line_profiler:
+*[pP]rofile*.lprof
+*[pP]rofile*.prof
+*.lprof
+*.prof
 
 hpc_stuff*
 wandb

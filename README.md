@@ -34,30 +34,47 @@ _Note: developed using python==3.8.16, pip==23.0.1, ubuntu==22.04.3_
 
 ### Torchrun Distributed Training/Testing (Example):
 
-* Train RND agent in MontezumaRevenge from scratch:
-    ```bash
-    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
-    ```
+* __Single Node Single Process with _--num_env_per_process_ many parallel environment processes:__
+
+    * Train RND agent in MontezumaRevenge from scratch:
+        ```bash
+        torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
+        ```
+* __Single Node 2 Processes with each having _--num_env_per_process_ many parallel environment processes (i.e. a total of 2*64=128 many environment processes):__
+    * Train RND agent in MontezumaRevenge from scratch:
+        ```bash
+        torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
+        ```
+* __2 Node 2 Processes per node with each having _--num_env_per_process_ many parallel environment processes (i.e. a total of 2*2*64=256 many environment processes):__
+    * Train RND agent in MontezumaRevenge from scratch:
+        in __Node1 (assume Node1 has ip 172.20.31.84)__ run:
+        ```bash
+        torchrun --nnodes 2 --nproc_per_node 2 --rdzv-backend=c10d --rdzv-endpoint=172.20.31.84:33333 --rdzv-id=13 --master-addr=172.20.31.84 main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
+        ```
+        and in __Node2__ run:
+        ```bash
+        torchrun --nnodes 2 --nproc_per_node 2 --rdzv-backend=c10d --rdzv-endpoint=172.20.31.84:33333 --rdzv-id=13 --master-addr=172.20.31.84 main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
+        ```
+        Note: with this approach in Node 1 gpus:['cuda:0', 'cuda:1'] will be used and in Node 2 gpus: ['cuda:0', 'cuda:1'] will be used. There will be a total of 4 agent processes (total of 4 copies of the agent model) and each of them will calculate gradients using rollouts collected from 64 parallel environments, and then distributed package will aggregate the individual computed gradients.
 
 * Continue Training RND agent from a checkpoint in MontezumaRevenge:
     1. set _loadModel = True_ in the corresponding config file.
     ```bash
-    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00_cont00 --save_model_path=checkpoints/MontezumaRevenge/rnd00_cont00.ckpt --load_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
+    torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00_cont00 --save_model_path=checkpoints/MontezumaRevenge/rnd00_cont00.ckpt --load_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt
     ```
-* Note that this examples uses 1 node and 128 processes in total. It will have 1 process as agent/trainer and another 127 processes as environment workers. You can modify the parameters of torchrun to suit your needs.
 
 By default, if your machine has more than 1 GPU then automatically a unique GPU will be assigned per trainer process. In order to use a specific GPU, you should pass _--gpu_id=*_ command line parameter and must have _GLOBAL_WORLD_SIZE == 1_.
 * Train RND agent in MontezumaRevenge from scratch using only the GPU _cuda:1_:
     ```bash
-    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt --gpu_id=1
+    torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/MontezumaRevenge/config_rnd00.conf --log_name=MontezumaRevenge_rnd00 --save_model_path=checkpoints/MontezumaRevenge/rnd00.ckpt --gpu_id=1
     ```
 
 ---
 * Test a RND agent in MontezumaRevenge:
     ```bash
-    torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --eval --config_path=./configs/demo_config.conf --log_name=MontezumaRevenge_rnd00 --load_model_path=checkpoints/rnd00.ckpt
+    torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --eval --config_path=./configs/demo_config.conf --log_name=MontezumaRevenge_rnd00 --load_model_path=checkpoints/rnd00.ckpt
     ```
-* Note that nproc_per_node has to be 2 for testing of the agent. This is because it supports only a single environment worker during training.
+* Note that nproc_per_node has to be 1 for testing of the agent. This is because it supports only a single environment worker during training.
 
 ---
 ### Profiling
@@ -150,48 +167,43 @@ By default, if your machine has more than 1 GPU then automatically a unique GPU 
             ```
     ---
 - __Distributed Training Architecture__
-    * The code relies on _torch.distributed_ package to implement distributed training. It is implemented so that every node is assigned a single agent (GPU) which gathers rollouts by interacting with the environment workers (CPU) and trains the agent. The rest of the processes in a given node are assigned as the environment workers. These processes have an instance of the gym environment and are used solely to interact with these environments in a parallelized manner. Every agent(trainer) process sends sends actions to the environment worker processes in their node and gathers interactions with the environments. Then, these interactions are used to train the model. Gradients across agent workers are synchronized by making use of the _DistributedDataParallel_ module of _torch_.
+    * The code relies on _torch.distributed_ package to implement distributed training. It is implemented so that every node is assigned _--nproc-per-node_ many agents (indpendent copies of agent_model on the GPU) which gathers rollouts by interacting with the _--num_env_per_process_ many parallel environment workers (CPU) and trains the agent. These processes have an instance of the gym environment and are used solely to interact with these environments in a parallelized manner. Every agent(trainer) process sends sends actions to the environment worker processes in their node and gathers interactions with the environments. Then, these interactions are used to train the model. Gradients across agent workers are synchronized by making use of the _DistributedDataParallel_ module of _torch_.
     
-    * In every node, 1 process (process with local_rank == 0) is assigned to the agents_group, the remaining processes are
-    assigned to the env_workers_group. To get a better understanding check out the example below.
+    * To get a better understanding check out the example below.
     agents_group processes have an instance of RNDAgent and perform optimizations.
-    env_workers_group processes have an instance of the environment and perform interactions with it.
+    env_workers_group processes have an instance of the environment and are used to interact with the parallelized environments.
         ```txt
         Example:
 
             Available from torchrun:
                 nnodes: number of nodes = 3
-                nproc_per_node: number of processes per node = 4
+                nproc_per_node: number of processes per node = 2
+                num_env_per_process = 4
             ---
 
             ************** NODE 0:
-            LOCAL_RANK 0: GPUs --> agents_group
-            LOCAL_RANK != 0: CPUs --> env_workers_group
+            LOCAL_RANK 0: GPU (cuda:0) --> 4 environment processes
+            LOCAL_RANK 1: GPU (cuda:1) --> 4 environment processes
             **************
             ...
 
-            ************** NODE: 1:
-            LOCAL_RANK 0: GPUs --> agents_group
-            LOCAL_RANK != 0: CPUs --> env_workers_group
-            **************
+            ************** NODE 1:
+            LOCAL_RANK 0: GPU (cuda:0) --> 4 environment processes
+            LOCAL_RANK 1: GPU (cuda:1) --> 4 environment processes
+            ************
             ...
 
-            ************** NODE: 2:
-            LOCAL_RANK 0: GPUs --> agents_group
-            LOCAL_RANK != 0: CPUs --> env_workers_group
-            **************
+            ************** NODE 2:
+            LOCAL_RANK 0: GPU (cuda:0) --> 4 environment processes
+            LOCAL_RANK 1: GPU (cuda:1) --> 4 environment processes
+            ************
 
-            -node0-  -node1-   -node2-
-            0,1,2,3  4,5,6,7  8,9,10,11    ||    agents_group_ranks=[0,4,8], env_workers_group_rank=[remaining ranks]
-            *        *        *
+                                -node0-  -node1-   -node2-
+                GLOBARL_RANK:     0,1,     2,3,      4,5   
+                                   *        *        *
+                Note that each rank has a copy of RNDAgent and 4 parallelized environment processes to gather rollouts for training. Their parameters get synchronized after every update to the model parameters.
         ```
     ---
-
-* __Tests__
-    * _tests.py_: This file contains some tests for environment wrappers and custom environment implementations.
-    ```bash
-    make run_tests
-    ```
 
 ---
 

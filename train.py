@@ -23,7 +23,7 @@ def main(args):
     use_cuda = default_config.getboolean('UseGPU')
     GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id = ddp_setup(logger, use_cuda, int(args['gpu_id']))
     
-    dist.barrier() # wait for process initialization logging inside ddp_setup() to finish
+    dist.barrier(device_ids=[int(gpu_id.split(':')[-1])]) # wait for process initialization logging inside ddp_setup() to finish
 
 
     logger.GLOBAL_RANK = GLOBAL_RANK
@@ -246,8 +246,8 @@ def main(args):
 
     agent = DDP(
         agent, 
-        device_ids=None if gpu_id == "cpu" else [gpu_id], 
-        output_device=None if gpu_id == "cpu" else gpu_id,
+        #device_ids=None if gpu_id == "cpu" else [gpu_id], 
+        #output_device=None if gpu_id == "cpu" else gpu_id,
         )
     
     agent_PPO_total_params = sum(p.numel() for p in agent.module.model.parameters())
@@ -310,9 +310,19 @@ def main(args):
             def __len__(self):
                 return self.total_states.shape[0]
                     
+            @torch.no_grad()
             def __getitem__(self, idx):
                 # send data to GPU and convert to required dtypes
-                s = torch.FloatTensor(self.total_states[idx]).unsqueeze(0).to(self.device) # [B=1, C=STATE_STACK_SIZE, H, W]
+                # s = torch.FloatTensor(self.total_states[idx]).unsqueeze(0).to(self.device) # [B=1, C=STATE_STACK_SIZE, H, W]
+                # assert list(s.shape) == [1, stateStackSize, input_size, input_size]
+
+                # s_views = self.transform(s) # -> [B, C=STATE_STACK_SIZE, H, W], [B, C=STATE_STACK_SIZE, H, W]
+                # s_view1, s_view2 = torch.reshape(s_views[0], [stateStackSize, input_size, input_size]), \
+                #     torch.reshape(s_views[1], [stateStackSize, input_size, input_size]) # -> [STATE_STACK_SIZE, H, W], [STATE_STACK_SIZE, H, W]
+                # assert (list(s_view1.shape) == [stateStackSize, input_size, input_size]) and (list(s_view2.shape) == [stateStackSize, input_size, input_size])
+
+                # return s_view1, s_view2
+                s = torch.FloatTensor(self.total_states[idx]).unsqueeze(0).to('cpu') # [B=1, C=STATE_STACK_SIZE, H, W]
                 assert list(s.shape) == [1, stateStackSize, input_size, input_size]
 
                 s_views = self.transform(s) # -> [B, C=STATE_STACK_SIZE, H, W], [B, C=STATE_STACK_SIZE, H, W]
@@ -320,7 +330,7 @@ def main(args):
                     torch.reshape(s_views[1], [stateStackSize, input_size, input_size]) # -> [STATE_STACK_SIZE, H, W], [STATE_STACK_SIZE, H, W]
                 assert (list(s_view1.shape) == [stateStackSize, input_size, input_size]) and (list(s_view2.shape) == [stateStackSize, input_size, input_size])
 
-                return s_view1, s_view2
+                return s_view1.to(self.device), s_view2.to(self.device)
 
         if agent.module.representation_lr_method == "BYOL":
             assert agent.module.representation_model.net is agent.module.model.feature # make sure that BYOL net and RL algo's feature extractor both point to the same network
@@ -440,18 +450,18 @@ def main(args):
                 SSL_training_epoch_losses = np.mean(SSL_training_cur_epoch_losses)
             
                 # Evaluate SSL model
-                SSL_training_cur_epoch_losses = []
+                SSL_evaluation_cur_epoch_losses = []
                 for s_batch_view1, s_batch_view2 in SSL_eval_dataloader:
                     # s_batch_view1, s_batch_view2 --> [B, STATE_STACK_SIZE, H, W], [B, STATE_STACK_SIZE, H, W]
                     assert (list(s_batch_view1.shape) == [batch_size, stateStackSize, input_size, input_size]) and (list(s_batch_view2.shape) == [batch_size, stateStackSize, input_size, input_size])
                     assert (s_batch_view1.device == torch.device(agent.module.device)) and (s_batch_view2.device == torch.device(agent.module.device))
 
-                    # Train SSL model
+                    # Evaluate SSL model
                     with torch.no_grad():
                         representation_loss = agent.module.representation_model(s_batch_view1, s_batch_view2) 
                     # logging
-                    SSL_training_cur_epoch_losses.append(representation_loss.detach().cpu().item())
-                SSL_evaluation_epoch_loss = np.mean(SSL_training_cur_epoch_losses)
+                    SSL_evaluation_cur_epoch_losses.append(representation_loss.detach().cpu().item())
+                SSL_evaluation_epoch_loss = np.mean(SSL_evaluation_cur_epoch_losses)
 
 
                 # Logging:
@@ -488,6 +498,8 @@ def main(args):
                         best_SSL_evaluation_epoch_loss = SSL_evaluation_epoch_loss
 
                     logger.tb_global_steps['SSL_pretraining_epoch'] = logger.tb_global_steps['SSL_pretraining_epoch'] + 1
+            
+            logger.check_scalene_profiler_finished() # scalene profiler
 
 
         
@@ -855,7 +867,7 @@ def main(args):
                             total_policy, global_update)
         logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | EXITTED TRAINING')
             
-        dist.barrier()
+        dist.barrier(device_ids=[int(gpu_id.split(':')[-1])])
 
         logger.step_pytorch_profiler(pytorch_profiler_log_path) # pytorch profiler
         logger.check_scalene_profiler_finished() # scalene profiler
