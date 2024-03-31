@@ -15,6 +15,7 @@ docker_rm:
 
 train:
 	# torchrun --nnodes 1 --nproc_per_node 2 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt 
+	# LOCAL_RANK=0 RANK=0 LOCAL_WORLD_SIZE=1 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 MASTER_PORT=29501 python3 main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00_cont00 --load_model_path=checkpoints/demo_00.ckpt --save_model_path=checkpoints/demo_00_cont00.ckpt
 	torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 3 --config_path=./configs/demo_config.conf --log_name=demo_00 --save_model_path=checkpoints/demo_00.ckpt 
 
 train_with_specific_gpu:
@@ -40,6 +41,12 @@ scalene_profiling:
 
 view_scalene:
 	scalene --viewer
+
+lineProfiler_profiling:
+	LOCAL_RANK=0 RANK=0 LOCAL_WORLD_SIZE=1 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 MASTER_PORT=29501 kernprof -l main.py --train --num_env_per_process 32 --config_path=./configs/demo_config.conf --log_name=demo_00_cont00 --load_model_path=checkpoints/demo_00.ckpt --save_model_path=checkpoints/demo_00_cont00.ckpt --scalene_profiling 10
+
+view_lineProfiler:
+	python -m line_profiler -rmt "main.py.lprof"
 
 test:
 	torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --eval --num_env_per_process 1 --config_path=./configs/demo_config.conf --log_name=demo_test_00 --load_model_path=checkpoints/demo_00.ckpt

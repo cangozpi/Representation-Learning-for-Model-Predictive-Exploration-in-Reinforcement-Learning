@@ -109,6 +109,15 @@ By default, if your machine has more than 1 GPU then automatically a unique GPU 
         ```bash
         make start_tensorboard_profiles
         ```
+* Profiling with line_profiler:
+    ```bash
+    LOCAL_RANK=0 RANK=0 LOCAL_WORLD_SIZE=1 WORLD_SIZE=1 MASTER_ADDR=127.0.0.1 MASTER_PORT=29501 kernprof -l main.py --train --num_env_per_process 32 --config_path=./configs/demo_config.conf --log_name=demo_00_cont00 --load_model_path=checkpoints/demo_00.ckpt --save_model_path=checkpoints/demo_00_cont00.ckpt --scalene_profiling 10
+    ```
+    * To see results run:
+        ```bash
+        python -m line_profiler -rmt "main.py.lprof"
+        ```
+    Note that we are not using kernprof with _torchrun_ but with _main.py_ directly. This stems from _torchrun_ spawning a new process to run _main.py_ which the _kernprof_ cannot profile due to being a subprocess and not the main process (i.e. _python -m torch.distributed.run_).
 ---
 
 ### Some helper commands

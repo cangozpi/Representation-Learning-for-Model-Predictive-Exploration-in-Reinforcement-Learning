@@ -17,6 +17,7 @@ from utils import Env_action_space_type
 
 # from torch.distributed.elastic.multiprocessing.errors import record
 # @record
+@profile
 def main(args):
     logger = Logger(file_log_path=path.join("logs", "file_logs", args['log_name']), tb_log_path=path.join("logs", "tb_logs", args['log_name']))
 
