@@ -588,7 +588,7 @@ class RNDAgent(nn.Module):
                 total_clipfrac.append(clipfrac)
                 if self.rnd is not None:
                     total_rnd_loss.append(rnd_loss.detach().cpu().item())
-                if self.representation_model is not None:
+                if (self.representation_model is not None) and (self.freeze_shared_backbone_during_training == False):
                     total_representation_loss.append(self.representation_loss_coef * representation_loss.detach().cpu().item())
                 total_grad_norm_unclipped.append(grad_norm_unclipped)
                 if default_config.getboolean('UseGradClipping') == True:

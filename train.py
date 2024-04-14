@@ -270,7 +270,7 @@ def main(args):
         for p1 in agent.module.model.feature.parameters():
             p1.requires_grad = True
     if representation_lr_method != 'None':
-        for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.get_trainable_parameters()):
+        for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.net.parameters()):
             assert p1.requires_grad == p2.requires_grad, "shared backbone is not frozen in all models, something is wrong with parameter sharing !" # make sure shared backbone is frozen in every sharing model
                 
 
