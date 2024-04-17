@@ -24,7 +24,10 @@ def main(args):
     use_cuda = default_config.getboolean('UseGPU')
     GLOBAL_WORLD_SIZE, GLOBAL_RANK, LOCAL_WORLD_SIZE, LOCAL_RANK, gpu_id = ddp_setup(logger, use_cuda, int(args['gpu_id']))
     
-    dist.barrier(device_ids=[int(gpu_id.split(':')[-1])]) # wait for process initialization logging inside ddp_setup() to finish
+    if gpu_id == 'cpu':
+        dist.barrier() # wait for process initialization logging inside ddp_setup() to finish
+    else:
+        dist.barrier(device_ids=[int(gpu_id.split(':')[-1])]) # wait for process initialization logging inside ddp_setup() to finish
 
 
     logger.GLOBAL_RANK = GLOBAL_RANK
@@ -868,7 +871,10 @@ def main(args):
                             total_policy, global_update)
         logger.log_msg_to_both_console_and_file(f'[RANK:{GLOBAL_RANK} | {gpu_id}] global_step: {global_step}, global_update: {global_update} | EXITTED TRAINING')
             
-        dist.barrier(device_ids=[int(gpu_id.split(':')[-1])])
+        if gpu_id == 'cpu':
+            dist.barrier()
+        else:
+            dist.barrier(device_ids=[int(gpu_id.split(':')[-1])])
 
         logger.step_pytorch_profiler(pytorch_profiler_log_path) # pytorch profiler
         logger.check_scalene_profiler_finished() # scalene profiler
