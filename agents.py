@@ -21,9 +21,10 @@ from config import args
 from math import radians
 
 from utils import Env_action_space_type
+from utils import prod
 from torch.distributions.normal import Normal
 
-from utils import Env_action_space_type
+from utils import Env_action_space_type, Shared_ppo_backbone_last_layer_type
 
 import wandb
 
@@ -53,7 +54,13 @@ class RNDAgent(nn.Module):
             logger:Logger=None):
         super().__init__()
         self.env_action_space_type = env_action_space_type
-        self.model = CnnActorCriticNetwork(input_size, output_size, self.env_action_space_type, use_noisy_net)
+        shared_ppo_backbone_last_layer_type = default_config['shared_ppo_backbone_last_layer_type']
+        assert shared_ppo_backbone_last_layer_type  in ['Linear', 'Conv']
+        if shared_ppo_backbone_last_layer_type == 'Linear':
+            self.shared_ppo_backbone_last_layer_type = Shared_ppo_backbone_last_layer_type.Linear
+        elif shared_ppo_backbone_last_layer_type == 'Conv':
+            self.shared_ppo_backbone_last_layer_type = Shared_ppo_backbone_last_layer_type.Conv
+        self.model = CnnActorCriticNetwork(input_size, output_size, self.env_action_space_type, use_noisy_net, shared_ppo_backbone_last_layer_type=self.shared_ppo_backbone_last_layer_type)
         self.num_env = num_env
         self.output_size = output_size
         self.input_size = input_size
@@ -76,14 +83,17 @@ class RNDAgent(nn.Module):
         assert isinstance(logger, Logger)
         self.logger = logger
 
-        extracted_feature_embedding_dim = self.model.extracted_feature_embedding_dim
+        if self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
+            extracted_feature_embedding_dim = self.model.extracted_feature_embedding_dim
+        elif self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
+            extracted_feature_embedding_dim = self.model.shared_ppo_backbone_last_layer_embedding_dim
         self.train_method = default_config['TrainMethod']
         assert self.train_method in ['PPO', 'original_RND', 'modified_RND']
         self.rnd = None
         if self.train_method == 'original_RND':
-            self.rnd = RNDModel(input_size=input_size, output_size=512, train_method=self.train_method)
+            self.rnd = RNDModel(input_size=(1, input_size, input_size), output_size=512, train_method=self.train_method, shared_ppo_backbone_last_layer_type=self.shared_ppo_backbone_last_layer_type)
         elif self.train_method == 'modified_RND':
-            self.rnd = RNDModel(input_size=extracted_feature_embedding_dim, output_size=512, train_method=self.train_method)
+            self.rnd = RNDModel(input_size=extracted_feature_embedding_dim, output_size=512, train_method=self.train_method, shared_ppo_backbone_last_layer_type=self.shared_ppo_backbone_last_layer_type)
         
         assert representation_lr_method in ['None', "BYOL", "Barlow-Twins"]
         self.representation_lr_method = representation_lr_method
@@ -99,7 +109,7 @@ class RNDAgent(nn.Module):
             BYOL_projection_size = int(default_config['BYOL_projectionSize'])
             BYOL_moving_average_decay = float(default_config['BYOL_movingAverageDecay'])
             apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
-            self.representation_model = BYOL(backbone_model, in_features=extracted_feature_embedding_dim, projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
+            self.representation_model = BYOL(backbone_model, in_features=prod(extracted_feature_embedding_dim), projection_size=BYOL_projection_size, projection_hidden_size=BYOL_projection_hidden_size, moving_average_decay=BYOL_moving_average_decay, batch_norm_mlp=True, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Augment(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BYOL_representationLossCoef'])
         # --------------------------------------------------------------------------------
@@ -114,7 +124,7 @@ class RNDAgent(nn.Module):
             projection_sizes = json.loads(default_config['BarlowTwinsProjectionSizes'])
             BarlowTwinsLambda = float(default_config['BarlowTwinsLambda'])
             apply_same_transform_to_batch = default_config.getboolean('apply_same_transform_to_batch')
-            self.representation_model = BarlowTwins(backbone_model, in_features=extracted_feature_embedding_dim, projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
+            self.representation_model = BarlowTwins(backbone_model, in_features=prod(extracted_feature_embedding_dim), projection_sizes=projection_sizes, lambd=BarlowTwinsLambda, use_cuda=use_cuda, device=device) # Model used to perform representation learning (e.g. BYOL)
             self.data_transform = Transform(input_size, apply_same_transform_to_batch=apply_same_transform_to_batch)
             self.representation_loss_coef = float(default_config['BarlowTwins_representationLossCoef'])
         # --------------------------------------------------------------------------------
@@ -144,7 +154,7 @@ class RNDAgent(nn.Module):
                 global bkwrd_loss_turn
                 global backbone_model
                 if bkwrd_loss_turn == 'loss2': # backward hook is currently called on representation_loss.backward (i.e. loss2.backward)
-                    if len(grad.shape) == 2: # weight grad
+                    if len(grad.shape) > 1: # weight grad
                         a = backbone_model[-2].weight.grad.data # [d]
                         b = grad # [d]
                         a = a.view(-1) # flatten matrix into a vector -> [d]
@@ -213,11 +223,20 @@ class RNDAgent(nn.Module):
                     gradient_projection_input_grad_backward_hook.gradient_projection_saved_input_grad = grad_input[0].clone()
 
 
-            # Project gradients for the weights and biases of the last linear layer:
-            self.weight_bkwrd_hook_handle = self.backbone_model[-2].weight.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
-            self.bias_bkwrd_hook_handle = self.backbone_model[-2].bias.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
-            # Project gradients flowing from the last linear layer to the previous layers:
-            self.input_bkwrd_hook_handle = self.backbone_model[-2].register_full_backward_hook(gradient_projection_input_grad_backward_hook)
+            if self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
+                # Project gradients for the weights and biases of the last linear layer:
+                self.weight_bkwrd_hook_handle = self.backbone_model[-2].weight.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
+                self.bias_bkwrd_hook_handle = self.backbone_model[-2].bias.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
+                # Project gradients flowing from the last linear layer to the previous layers:
+                self.input_bkwrd_hook_handle = self.backbone_model[-2].register_full_backward_hook(gradient_projection_input_grad_backward_hook)
+            elif self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
+                # Project gradients for the weights and biases of the last linear layer:
+                self.weight_bkwrd_hook_handle = self.backbone_model[-2].weight.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
+                self.bias_bkwrd_hook_handle = self.backbone_model[-2].bias.register_hook(gradient_projection_backward_hook) # attach to last linear layer. Note that [-1]^th element is ReLU activation
+                # Project gradients flowing from the last linear layer to the previous layers:
+                self.input_bkwrd_hook_handle = self.backbone_model[-2].register_full_backward_hook(gradient_projection_input_grad_backward_hook)
+            else:
+                raise Exception(f'RNDAgent.setup_gradient_projection() has come across a not "implemented shared_ppo_backbone_last_layer_type": {self.shared_ppo_backbone_last_layer_type} !')
 
             self.use_gradient_projection = True
 

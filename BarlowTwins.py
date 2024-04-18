@@ -48,8 +48,17 @@ class BarlowTwins(nn.Module):
         return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
     def forward(self, y1, y2):
-        z1 = self.projector(self.backbone(y1))
-        z2 = self.projector(self.backbone(y2))
+        # z1 = self.projector(self.backbone(y1))
+        # z2 = self.projector(self.backbone(y2))
+
+        embed1 = self.backbone(y1)
+        if len(embed1.shape) > 2: # if embeddings are not of shape (B, embedding_size), then flatten them. Needed for modidifedRND's Shared_PPO_backbone_type.Conv
+            embed1 = embed1.view(embed1.shape[0], -1) # [B, 64*7*7]
+        z1 = self.projector(embed1)
+        embed2 = self.backbone(y2)
+        if len(embed2.shape) > 2: # if embeddings are not of shape (B, embedding_size), then flatten them. Needed for modidifedRND's Shared_PPO_backbone_type.Conv
+            embed2 = embed2.view(embed2.shape[0], -1) # [B, 64*7*7]
+        z2 = self.projector(embed2)
 
         # empirical cross-correlation matrix
         c = self.bn(z1).T @ self.bn(z2)

@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import defaultdict
 import os
 import datetime
+import math
 from os import path
 from matplotlib import pyplot as plt
 
@@ -34,8 +35,21 @@ class Env_action_space_type(Enum):
     DISCRETE = 0
     CONTINUOUS = 1
 
+class Shared_ppo_backbone_last_layer_type(Enum):
+    Linear = 0
+    Conv = 1
+
 def init_tb_global_step():
     return 0
+
+def prod(x):
+    y = None
+    try:
+        y = math.prod(x)
+    except TypeError:
+        y = x
+    return y
+
 
 
 def make_train_data(reward, done, value, gamma, num_step, num_worker):

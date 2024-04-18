@@ -90,6 +90,8 @@ class AddProjHead(nn.Module):
         embedding = self.backbone(x)
         if return_embedding:
             return embedding
+        if len(embedding.shape) > 2: # if embeddings are not of shape (B, embedding_size), then flatten them. Needed for modidifedRND's Shared_PPO_backbone_type.Conv
+            embedding = embedding.view(embedding.shape[0], -1)
         return self.projection(embedding)
 
 

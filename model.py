@@ -4,9 +4,10 @@ import torch
 import torch.optim as optim
 import numpy as np
 import math
+from utils import prod
 from torch.nn import init
 from config import default_config
-from utils import Env_action_space_type
+from utils import Env_action_space_type, Shared_ppo_backbone_last_layer_type
 
 
 class NoisyLinear(nn.Module):
@@ -78,10 +79,12 @@ class CnnActorCriticNetwork(nn.Module):
 
     # self.extracted_feature_embedding_dim  = 448
     extracted_feature_embedding_dim  = int(default_config['extracted_feature_embedding_dim'])
+    shared_ppo_backbone_last_layer_embedding_dim = (64, 7, 7) # C=64, H=7, W=7
 
-    def __init__(self, input_size, output_size, env_action_space_type, use_noisy_net=False, ):
+    def __init__(self, input_size, output_size, env_action_space_type, use_noisy_net=False, shared_ppo_backbone_last_layer_type=Shared_ppo_backbone_last_layer_type.Linear):
         super(CnnActorCriticNetwork, self).__init__()
         self.env_action_space_type = env_action_space_type
+        self.shared_ppo_backbone_last_layer_type = shared_ppo_backbone_last_layer_type
 
         if self.env_action_space_type == Env_action_space_type.DISCRETE:
             pass
@@ -97,35 +100,68 @@ class CnnActorCriticNetwork(nn.Module):
             linear = nn.Linear
 
         # --------------- original paper's architecture below:
-        self.feature = nn.Sequential(
-            nn.Conv2d(
-                in_channels=4, # TODO: this equals StateStackSize
-                out_channels=32,
-                kernel_size=8,
-                stride=4),
-            nn.ReLU(),
-            nn.Conv2d(
-                in_channels=32,
-                out_channels=64,
-                kernel_size=4,
-                stride=2),
-            nn.ReLU(),
-            nn.Conv2d(
-                in_channels=64,
-                out_channels=64,
-                kernel_size=3,
-                stride=1),
-            nn.ReLU(),
-            Flatten(),
-            linear(
-                7 * 7 * 64,
-                256),
-            nn.ReLU(),
-            linear(
-                256,
-                CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # TODO: set extracted_feature_embedding_dim to 448 to match original RND paper !
-            nn.ReLU()
-        )
+        if self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
+            self.feature = nn.Sequential(
+                nn.Conv2d(
+                    in_channels=int(default_config['StateStackSize']),
+                    out_channels=32,
+                    kernel_size=8,
+                    stride=4),
+                nn.ReLU(),
+                nn.Conv2d(
+                    in_channels=32,
+                    out_channels=64,
+                    kernel_size=4,
+                    stride=2),
+                nn.ReLU(),
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=3,
+                    stride=1),
+                nn.ReLU(),
+                Flatten(),
+                linear(
+                    prod(CnnActorCriticNetwork.shared_ppo_backbone_last_layer_embedding_dim),
+                    256),
+                nn.ReLU(),
+                linear(
+                    256,
+                    CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # Note: set extracted_feature_embedding_dim to 448  in order to match the original RND paper !
+                nn.ReLU()
+            )
+        elif self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
+            self.feature = nn.Sequential(
+                nn.Conv2d(
+                    in_channels=int(default_config['StateStackSize']),
+                    out_channels=32,
+                    kernel_size=8,
+                    stride=4),
+                nn.ReLU(),
+                nn.Conv2d(
+                    in_channels=32,
+                    out_channels=64,
+                    kernel_size=4,
+                    stride=2),
+                nn.ReLU(),
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=3,
+                    stride=1),
+                nn.ReLU(),
+            )
+            self.feature_cont_prePPOHeads = nn.Sequential(
+                Flatten(),
+                linear(
+                    prod(CnnActorCriticNetwork.shared_ppo_backbone_last_layer_embedding_dim),
+                    256),
+                nn.ReLU(),
+                linear(
+                    256,
+                    CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 448 # Note: set extracted_feature_embedding_dim to 448  in order to match the original RND paper !
+                nn.ReLU()
+            )
 
         # Discrete/Continuous Actor Heads:
         if self.env_action_space_type == Env_action_space_type.DISCRETE:
@@ -176,70 +212,12 @@ class CnnActorCriticNetwork(nn.Module):
                 self.extra_layer[i].bias.data.zero_()
 
         
-
-        # --------------- my architecture below:
-        # self.feature = nn.Sequential(
-        #     nn.Conv2d(
-        #         in_channels=4, # TODO: this equals StateStackSize
-        #         out_channels=8,
-        #         kernel_size=7,
-        #         stride=2),
-        #     nn.ReLU(),
-        #     nn.Conv2d(
-        #         in_channels=8,
-        #         out_channels=8,
-        #         kernel_size=5,
-        #         stride=2),
-        #     nn.ReLU(),
-        #     nn.Conv2d(
-        #         in_channels=8,
-        #         out_channels=8,
-        #         kernel_size=3,
-        #         stride=1),
-        #     nn.ReLU(),
-        #     Flatten(),
-        #     # -- old smaller layers below:
-        #     # linear(
-        #     #     # 7 * 7 * 64, #TOOD: ?
-        #     #     # 23104 // 2,
-        #     #     # 200,
-        #     #     2048,
-        #     #     64),
-        #     # nn.ReLU(),
-        #     # linear(
-        #     #     64,
-        #     #     32),
-        #     # ---
-        #     linear(
-        #         # 7 * 7 * 64, #TOOD: ?
-        #         # 23104 // 2,
-        #         # 200,
-        #         2048,
-        #         256),
-        #     nn.ReLU(),
-        #     linear(
-        #         256,
-        #         CnnActorCriticNetwork.extracted_feature_embedding_dim), # = 128
-        #     nn.ReLU()
-        # )
-
-        # self.actor = nn.Sequential(
-        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
-        #     nn.ReLU(),
-        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, output_size)
-        # )
-
-        # self.extra_layer = nn.Sequential(
-        #     linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, CnnActorCriticNetwork.extracted_feature_embedding_dim),
-        #     nn.ReLU()
-        # )
-
-        # self.critic_ext = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
-        # self.critic_int = linear(CnnActorCriticNetwork.extracted_feature_embedding_dim, 1)
-        
-
     def forward(self, state):
-        x = self.feature(state)
+        if self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
+            x = self.feature(state)
+        elif self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
+            x = self.feature(state)
+            x = self.feature_cont_prePPOHeads(x)
         if self.env_action_space_type == Env_action_space_type.DISCRETE:
             policy = self.actor(x)
             value_ext = self.critic_ext(self.extra_layer(x) + x)
@@ -255,15 +233,17 @@ class CnnActorCriticNetwork(nn.Module):
 
 class RNDModel(nn.Module):
     # Refer to: https://github.com/openai/random-network-distillation/blob/master/policies/cnn_policy_param_matched.py for the architecture
-    def __init__(self, input_size=32, output_size=512, train_method="modified_RND"):
+    def __init__(self, input_size=32, output_size=512, train_method="modified_RND", shared_ppo_backbone_last_layer_type=Shared_ppo_backbone_last_layer_type.Conv):
         super(RNDModel, self).__init__()
         assert train_method in ['original_RND', 'modified_RND']
+        if train_method == 'original_RND':
+            assert shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear, 'When using train_method="original_RND", the shared_ppo_backbone_last_layer_type must be "Linear"'
 
         self.input_size = input_size
         self.output_size = output_size
 
         if train_method == 'original_RND':
-            feature_output = 7 * 7 * 64
+            feature_output = 64 * 7 * 7 
             self.predictor = nn.Sequential(
                 nn.Conv2d(
                     in_channels=1,
@@ -313,8 +293,65 @@ class RNDModel(nn.Module):
                 Flatten(),
                 nn.Linear(feature_output, output_size)
             )
+        
+        elif train_method == 'modified_RND' and shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
+            feature_output = 64 * 8 * 8
+            # input size: [64, 7, 7]
+            self.predictor = nn.Sequential(
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=2,
+                    stride=1,
+                    padding=1),
+                nn.LeakyReLU(),
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=2,
+                    stride=1,
+                    padding=1),
+                nn.LeakyReLU(),
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=2,
+                    stride=1),
+                nn.LeakyReLU(),
+                Flatten(),
+                nn.Linear(feature_output, output_size),
+                nn.ReLU(),
+                nn.Linear(output_size, output_size),
+                nn.ReLU(),
+                nn.Linear(output_size, output_size)
+            )
 
-        elif train_method == 'modified_RND':
+            self.target = nn.Sequential(
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=2,
+                    stride=1,
+                    padding=1),
+                nn.LeakyReLU(),
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=2,
+                    stride=1,
+                    padding=1),
+                nn.LeakyReLU(),
+                nn.Conv2d(
+                    in_channels=64,
+                    out_channels=64,
+                    kernel_size=2,
+                    stride=1),
+                nn.LeakyReLU(),
+                Flatten(),
+                nn.Linear(feature_output, output_size)
+            )
+
+        elif train_method == 'modified_RND' and shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
             self.predictor = nn.Sequential(
                 nn.Linear(input_size, 64),
                 nn.LeakyReLU(),

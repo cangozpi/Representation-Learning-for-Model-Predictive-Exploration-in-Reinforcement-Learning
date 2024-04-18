@@ -12,7 +12,8 @@ from dist_utils import ddp_setup, create_parallel_env_processes
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset, DataLoader
-from utils import Env_action_space_type
+from utils import Env_action_space_type, Shared_ppo_backbone_last_layer_type
+from model import CnnActorCriticNetwork
 
 
 # from torch.distributed.elastic.multiprocessing.errors import record
@@ -57,6 +58,8 @@ def main(args):
     freeze_shared_backbone = default_config.getboolean('freeze_shared_backbone')
     train_method = default_config['TrainMethod']
     assert train_method in ['PPO', 'original_RND', 'modified_RND']
+    shared_ppo_backbone_last_layer_type = default_config['shared_ppo_backbone_last_layer_type']
+    assert shared_ppo_backbone_last_layer_type  in ['Linear', 'Conv']
     representation_lr_method = str(default_config['representationLearningMethod'])
 
     env_id = default_config['EnvID']
@@ -127,7 +130,10 @@ def main(args):
         obs_rms = RunningMeanStd(shape=(1, 1, input_size, input_size), usage='obs_rms') # used for normalizing inputs to RND module (i.e. extracted_feature_embeddings)
     elif train_method == 'modified_RND':
         extracted_feature_embedding_dim = CnnActorCriticNetwork.extracted_feature_embedding_dim
-        obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim), usage='obs_rms') # used for normalizing inputs to RND module (i.e. extracted_feature_embeddings)
+        if shared_ppo_backbone_last_layer_type == 'Linear':
+            obs_rms = RunningMeanStd(shape=(1, extracted_feature_embedding_dim), usage='obs_rms') # used for normalizing inputs to RND module (i.e. extracted_feature_embeddings)
+        elif shared_ppo_backbone_last_layer_type == 'Conv':
+            obs_rms = RunningMeanStd(shape=(1, *CnnActorCriticNetwork.shared_ppo_backbone_last_layer_embedding_dim), usage='obs_rms') # used for normalizing inputs to RND module (i.e. shared PPO backbone's last Conv layer output)
     elif train_method == 'PPO':
         obs_rms = None
     pre_obs_norm_step = int(default_config['ObsNormStep'])
@@ -273,8 +279,12 @@ def main(args):
         for p1 in agent.module.model.feature.parameters():
             p1.requires_grad = True
     if representation_lr_method != 'None':
-        for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.net.parameters()):
-            assert p1.requires_grad == p2.requires_grad, "shared backbone is not frozen in all models, something is wrong with parameter sharing !" # make sure shared backbone is frozen in every sharing model
+        if representation_lr_method == "BYOL":
+            for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.net.parameters()):
+                assert p1.requires_grad == p2.requires_grad, "shared backbone is not frozen in all models, something is wrong with parameter sharing !" # make sure shared backbone is frozen in every sharing model
+        elif representation_lr_method == "Barlow-Twins":
+            for p1, p2 in zip(agent.module.model.feature.parameters(), agent.module.representation_model.backbone.parameters()):
+                assert p1.requires_grad == p2.requires_grad, "shared backbone is not frozen in all models, something is wrong with parameter sharing !" # make sure shared backbone is frozen in every sharing model
                 
 
     agent.module.set_mode("train")
@@ -569,8 +579,11 @@ def main(args):
                     elif train_method == 'modified_RND':
                         with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
                             assert (list(next_obs.shape) == [num_step*num_env_workers, stateStackSize, input_size, input_size])
-                            extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [(num_step * num_env_workers), feature_embeddings_dim]
-                            assert (list(extracted_feature_embeddings.shape) == [num_step*num_env_workers, extracted_feature_embedding_dim])
+                            extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # for Shared_ppo_backbone_last_layer_type.Linear [(num_step * num_env_workers), feature_embeddings_dim]
+                            if agent.module.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
+                                assert (list(extracted_feature_embeddings.shape) == [num_step*num_env_workers, extracted_feature_embedding_dim])
+                            elif agent.module.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
+                                assert (list(extracted_feature_embeddings.shape) == [num_step*num_env_workers, *CnnActorCriticNetwork.shared_ppo_backbone_last_layer_embedding_dim])
                         obs_rms.update(extracted_feature_embeddings)
         if is_render:
             renderer.close()
@@ -676,7 +689,10 @@ def main(args):
                 with torch.no_grad(): # gradients should not flow backwards from RND to the PPO's bacbone (i.e. RND gradients should stop at the feature embeddings extracted by the PPO's bacbone)
                     assert (list(next_obs.shape) == [num_env_workers, stateStackSize, input_size, input_size])
                     extracted_feature_embeddings = agent.module.extract_feature_embeddings(next_obs / 255).cpu().numpy() # [num_worker_envs, feature_embeddings_dim]
-                    assert (list(extracted_feature_embeddings.shape) == [num_env_workers, extracted_feature_embedding_dim])
+                    if agent.module.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
+                        assert (list(extracted_feature_embeddings.shape) == [num_env_workers, extracted_feature_embedding_dim])
+                    elif agent.module.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
+                        assert (list(extracted_feature_embeddings.shape) == [num_env_workers, *CnnActorCriticNetwork.shared_ppo_backbone_last_layer_embedding_dim])
                     intrinsic_reward = agent.module.compute_intrinsic_reward(
                         ((extracted_feature_embeddings - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5)) # -> [num_env, ]
 
