@@ -445,18 +445,19 @@ class RNDAgent(nn.Module):
                     # plot original frame vs transformed views for debugging purposes
                     if False:
                         import matplotlib.pyplot as plt
-                        for i in range(4):
+                        # for i in range(4):
+                        while True:
                             idx = np.random.choice(B)
                             print(idx)
                             fig, axs = plt.subplots(4, 2, constrained_layout=True)
-                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
-                            axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].permute(1, 2, 0), cmap='gray')
+                            axs[0,0].imshow(s_batch[idx, 0, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
+                            axs[0,1].imshow(s_batch_view1[idx, 0, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
+                            axs[1,0].imshow(s_batch[idx, 1, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
+                            axs[1,1].imshow(s_batch_view1[idx, 1, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
+                            axs[2,0].imshow(s_batch[idx, 2, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
+                            axs[2,1].imshow(s_batch_view1[idx, 2, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
+                            axs[3,0].imshow(s_batch[idx, 3, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
+                            axs[3,1].imshow(s_batch_view1[idx, 3, None, :, :].cpu().permute(1, 2, 0), cmap='gray')
 
                             axs[0,0].set_title(f'original state:{idx} frame:0', fontsize=10)
                             axs[0,1].set_title(f'augmented state:{idx} frame:0', fontsize=10)
