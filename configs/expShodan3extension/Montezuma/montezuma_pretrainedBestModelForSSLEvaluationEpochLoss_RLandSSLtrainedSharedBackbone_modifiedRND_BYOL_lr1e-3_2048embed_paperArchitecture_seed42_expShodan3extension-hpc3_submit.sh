@@ -22,7 +22,7 @@
 
 # -= Resources =-
 #
-#SBATCH --job-name=Montezuma_modifiedRND_Barlow_2048embed_reprCoef0001_paperArchitecture_seed44_exp26-10_7day_batchjob
+#SBATCH --job-name=Montezuma_pretrainedBestModelForSSLEvaluationEpochLoss_RLandSSLtrainedSharedBackbone_modifiedRND_BYOL_1e-3_2048embed_paperArchitecture_seed42_expShodan3extension-hpc3_7day_batchjob
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=30
@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp26/Montezuma/config_modifiedRND_Barlow_2048embed_reprCoef0001_paperArchitecture_Montezuma.conf --log_name=montezuma_modifiedRND_Barlow_2048embed_reprCoef0001_paperArchitecture_seed44_exp26-10 --save_model_path=checkpoints/exp26/Montezuma/montezuma_modifiedRND_Barlow_2048embed_reprCoef0001_paperArchitecture_exp26-10.ckpt --seed=44 --use_wandb --wandb_api_key=c44854fd20c3fd3003a1c5b49426093698ada7b1
+torchrun --nnodes 1 --nproc_per_node 1 --rdzv-backend=c10d --rdzv-endpoint=127.0.0.1:0 --rdzv-id=313 main.py --train --num_env_per_process 64 --config_path=./configs/expShodan3extension/Montezuma/config_pretrained_RLandSSLtrainedSharedBackbone_modifiedRND_BYOL_lr1e-3_2048embed_paperArchitecture_Montezuma.conf --log_name=montezuma_pretrainedBestModelForSSLEvaluationEpochLoss_RLandSSLtrainedSharedBackbone_modifiedRND_BYOL_1e-3_2048embed_paperArchitecture_seed42_expShodan3extension-hpc3 --save_model_path=checkpoints/expShodan3extension/Montezuma/montezuma_pretrainedBestModelForSSLEvaluationEpochLoss_RLandSSLtrainedSharedBackbone_modifiedRND_BYOL_1e-3_2048embed_paperArchitecture_expShodan3extension-hpc3.ckpt --load_model_path=checkpoints/expShodan3/Montezuma/montezuma_pretraining_modifiedRND_BYOL_lr1e-3_2048embed_paperArchitecture_expShodan3-5__BestModelForSSLEvaluationEpochLoss.ckpt --seed=42 --use_wandb --wandb_api_key=c44854fd20c3fd3003a1c5b49426093698ada7b1

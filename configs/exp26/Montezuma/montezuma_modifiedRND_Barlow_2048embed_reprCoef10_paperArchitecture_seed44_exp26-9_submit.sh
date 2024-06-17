@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp26/Montezuma/config_modifiedRND_Barlow_2048embed_reprCoef10_paperArchitecture_Montezuma.conf --log_name=montezuma_modifiedRND_Barlow_2048embed_reprCoef10_paperArchitecture_seed44_exp26-9 --save_model_path=checkpoints/exp26/Montezuma/montezuma_modifiedRND_Barlow_2048embed_reprCoef10_paperArchitecture_exp26-9.ckpt --seed=44 --use_wandb --wandb_api_key=d012c9698bf568b1807b1cfe9ed56611311573e8
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp26/Montezuma/config_modifiedRND_Barlow_2048embed_reprCoef10_paperArchitecture_Montezuma.conf --log_name=montezuma_modifiedRND_Barlow_2048embed_reprCoef10_paperArchitecture_seed44_exp26-9 --save_model_path=checkpoints/exp26/Montezuma/montezuma_modifiedRND_Barlow_2048embed_reprCoef10_paperArchitecture_exp26-9.ckpt --seed=44 --use_wandb --wandb_api_key=c44854fd20c3fd3003a1c5b49426093698ada7b1
