@@ -22,7 +22,7 @@
 
 # -= Resources =-
 #
-#SBATCH --job-name=Montezuma_modifiedRND_Barlow_2048embed_reprCoef00001_paperArchitecture_seed44_exp26-11_7day_batchjob
+#SBATCH --job-name=Montezuma_modifiedRND_noSSL_2048embed_paperArchitecture_seed44_exp27-6_7day_batchjob
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=30
@@ -76,4 +76,4 @@ echo "Running Python script..."
 
 cd ../../../
 
-torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp26/Montezuma/config_modifiedRND_Barlow_2048embed_reprCoef00001_paperArchitecture_Montezuma.conf --log_name=montezuma_modifiedRND_Barlow_2048embed_reprCoef00001_paperArchitecture_seed44_exp26-11 --save_model_path=checkpoints/exp26/Montezuma/montezuma_modifiedRND_Barlow_2048embed_reprCoef00001_paperArchitecture_exp26-11.ckpt --seed=44 --use_wandb --wandb_api_key=c44854fd20c3fd3003a1c5b49426093698ada7b1
+torchrun --nnodes 1 --nproc_per_node 1 --standalone main.py --train --num_env_per_process 64 --config_path=./configs/exp27/Montezuma/config_modifiedRND_noSSL_2048embed_paperArchitecture_Montezuma.conf --log_name=montezuma_modifiedRND_noSSL_2048embed_paperArchitecture_seed44_exp27-6 --save_model_path=checkpoints/exp27/Montezuma/montezuma_modifiedRND_noSSL_2048embed_paperArchitecture_exp27-6.ckpt --seed=44 --use_wandb --wandb_api_key=c44854fd20c3fd3003a1c5b49426093698ada7b1
