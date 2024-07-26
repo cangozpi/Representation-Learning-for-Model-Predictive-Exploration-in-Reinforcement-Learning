@@ -26,6 +26,8 @@ from torch.distributions.normal import Normal
 
 from utils import Env_action_space_type, Shared_ppo_backbone_last_layer_type
 
+from copy import deepcopy
+
 import wandb
 
 
@@ -83,12 +85,30 @@ class RNDAgent(nn.Module):
         assert isinstance(logger, Logger)
         self.logger = logger
 
+        self.train_method = default_config['TrainMethod']
+        assert self.train_method in ['PPO', 'original_RND', 'modified_RND']
+
+        if default_config.getboolean('use_EMA_updated_shared_ppo_backbone_for_RND') == True:
+            assert self.train_method == 'modified_RND'
+            # create the target backbone
+            self.model.target_feature = deepcopy(self.model.feature) # target_feature will be EMA updated version of feature which will be used to produce stable inputs to the RND Module, and feature will be trained with both the PPO module and the SSL module
+            self.update_target_network(self.model.feature, self.model.target_feature, 1.0) # setting tau to 1 so that target backbone would have the same initial parameters as the online shared PPO backbone
+            self.model.target_feature = self.model.target_feature.to(next(self.model.feature.parameters()).device) # move target backbone to the same device as the original (online) backbone
+            # freeze the target backbone
+            for param in self.model.target_feature.parameters():
+                param.requires_grad = False
+            # set the EMA's tau value from the config
+            self.EMA_tau = float(default_config['EMA_tau'])
+
+            # check that two networks are the same
+            for param1, param2 in zip(self.model.feature.parameters(), self.model.target_feature.parameters()):
+                assert torch.equal(param1, param2)
+            
+
         if self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Linear:
             extracted_feature_embedding_dim = self.model.extracted_feature_embedding_dim
         elif self.shared_ppo_backbone_last_layer_type == Shared_ppo_backbone_last_layer_type.Conv:
             extracted_feature_embedding_dim = self.model.shared_ppo_backbone_last_layer_embedding_dim
-        self.train_method = default_config['TrainMethod']
-        assert self.train_method in ['PPO', 'original_RND', 'modified_RND']
         self.rnd = None
         if self.train_method == 'original_RND':
             self.rnd = RNDModel(input_size=(1, input_size, input_size), output_size=512, train_method=self.train_method, shared_ppo_backbone_last_layer_type=self.shared_ppo_backbone_last_layer_type)
@@ -140,6 +160,17 @@ class RNDAgent(nn.Module):
 
         self.freeze_shared_backbone_during_training = default_config.getboolean('freeze_shared_backbone')
 
+    def update_target_network(self, main_network, target_network, tau):
+        """
+        Update the target network using EMA from the main network.
+    
+        Parameters:
+        - main_network (nn.Module): The current network (i.e. shared PPO backbone which is trained both with the PPO Module and the SSL Module).
+        - target_network (nn.Module): The target network to be updated (i.e. target PPO backbone).
+        - tau (float): The smoothing factor.
+        """
+        for target_param, main_param in zip(target_network.parameters(), main_network.parameters()):
+            target_param.data.copy_(tau * main_param.data + (1.0 - tau) * target_param.data)
     
 
     def setup_gradient_projection(self):
@@ -250,7 +281,12 @@ class RNDAgent(nn.Module):
         (without repetition of the shared parameters btw different models/modules).
         In other words returns parameters from PPO Agent, RND, and Representation Model (i.e. BYOL, Barlow-Twins).
         """
-        agent_params = list(self.model.parameters()) # PPO params
+        if default_config.getboolean('use_EMA_updated_shared_ppo_backbone_for_RND') == True: # target backbone parameters should not be included
+            self.model.target_feature = self.model.target_feature.to(next(self.model.feature.parameters()).device) # move target backbone to the same device as the original (online) backbone
+            agent_params = [param for param in self.model.parameters() if param not in set(self.model.target_feature.parameters())] # PPO params without the target shared ppo backbone parameters
+            assert len(list(self.model.parameters())) == len(agent_params) + len(list(self.model.target_feature.parameters()))
+        else:
+            agent_params = list(self.model.parameters()) # PPO params
         if self.rnd is not None: # RND params
             agent_params = [*agent_params, *list(self.rnd.predictor.parameters())]
         if self.representation_model is not None: # representation model params (i.e. BYOL | Barlow-Twins)
@@ -258,8 +294,15 @@ class RNDAgent(nn.Module):
         agent_params = set(agent_params)
         
         # double checking
-        for p in self.model.parameters():
-            assert p in agent_params
+        if default_config.getboolean('use_EMA_updated_shared_ppo_backbone_for_RND') == True: # target backbone parameters should not be included
+            for p in self.model.parameters():
+                if p in set(self.model.target_feature.parameters()):
+                    assert p not in agent_params
+                else:
+                    assert p in agent_params
+        else:
+            for p in self.model.parameters():
+                assert p in agent_params
         if self.rnd is not None:
             for p in self.rnd.predictor.parameters():
                 assert p in agent_params
@@ -289,6 +332,9 @@ class RNDAgent(nn.Module):
                 self.representation_model = self.representation_model.eval()
         else:
             raise NotImplementedError()
+        
+        if default_config.getboolean('use_EMA_updated_shared_ppo_backbone_for_RND') == True:
+            self.model.target_feature = self.model.target_feature.eval() # target backbone should always be in eval mode to produce more stable inputs
 
     def get_action(self, state):
         state = torch.Tensor(state).type(torch.float32).to(self.device)
@@ -329,7 +375,11 @@ class RNDAgent(nn.Module):
         what is used as the shared feature extractor in our proposed approach.
         """
         states = torch.FloatTensor(states).to(self.device)
-        extracted_feature_embeddings = self.model.feature(states)
+        if default_config.getboolean('use_EMA_updated_shared_ppo_backbone_for_RND') == True:
+            with torch.no_grad():
+                extracted_feature_embeddings = self.model.target_feature(states)
+        elif default_config.getboolean('use_EMA_updated_shared_ppo_backbone_for_RND') == False:
+            extracted_feature_embeddings = self.model.feature(states)
         return extracted_feature_embeddings
 
     def train_model(self, states, target_ext, target_int, y, adv, normalized_extracted_feature_embeddings, old_policy, global_update):
@@ -677,6 +727,13 @@ class RNDAgent(nn.Module):
                     **epoch_log_dict
                 })
                 self.logger.tb_global_steps['epoch'] = self.logger.tb_global_steps['epoch'] + 1
+            
+
+            # EMA update the target PPO backbone
+            if default_config.getboolean('use_EMA_updated_shared_ppo_backbone_for_RND') == True:
+                self.update_target_network(self.model.feature, self.model.target_feature, self.EMA_tau)
+                self.model.target_feature.eval() # put into eval mode again just to be safe
+
 
             # logging (tb):
             self.logger.log_scalar_to_tb_without_step('train/overall_loss (everything combined) vs epoch', np.mean(total_loss), only_rank_0=True)
